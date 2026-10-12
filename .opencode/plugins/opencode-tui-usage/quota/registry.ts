@@ -11,6 +11,7 @@ export type ProviderRegistration = {
   id: string
   apiUrl: string
   enabled?: boolean // 默认 true；false = 已实现但暂不激活（如等待真实数据验证）
+  render?: string // 共享渲染器名（view/renderers 注册）；省略/未知 → 默认 "bars"
   fetch: (apiUrl: string, key: string) => Promise<QuotaData | undefined>
 }
 
@@ -30,11 +31,14 @@ export function createRegistry(providers: ProviderRegistration[]) {
   // API URL 查找：未命中返回 undefined（调用方 QuotaStore 记 warn 并跳过，不做兜底指向）
   const getProviderApiUrl = (pid: string): string | undefined => match(pid)?.apiUrl
 
+  // 共享渲染器名：未命中/未声明返回 undefined（UI 侧回落默认渲染器）
+  const getProviderRenderer = (pid: string): string | undefined => match(pid)?.render
+
   // 按供应商分发 fetcher：未命中返回 undefined
   const fetchQuota = async (pid: string, apiUrl: string, key: string): Promise<QuotaData | undefined> => {
     const p = match(pid)
     return p ? p.fetch(apiUrl, key) : undefined
   }
 
-  return { isQuotaProvider, getProviderApiUrl, fetchQuota }
+  return { isQuotaProvider, getProviderApiUrl, getProviderRenderer, fetchQuota }
 }

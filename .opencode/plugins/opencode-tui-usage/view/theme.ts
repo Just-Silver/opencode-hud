@@ -18,10 +18,9 @@ export const BORDER_COLOR = "#484848" // 面板边框（border）
 export const DIVIDER_COLOR = "#3c3c3c" // 区块分隔线（borderSubtle）
 export const TRACK_COLOR = "#1e1e1e" // 进度条轨道（backgroundElement）
 
-// 区块标题与窗口标签
+// 区块标题（额度区块；行标签由 provider 自定，见 model/types.ts QuotaItem）
 export const SECTION_CACHE_TITLE = "会话"
 export const SECTION_QUOTA_TITLE = "额度"
-export const QUOTA_LABELS = ["5h", "周", "月"] as const
 
 // 进度条颜色：<50% 绿 → ≥50% 橙 → ≥85% 红
 // （pct 未定义 = 无数据 → 弱化灰）

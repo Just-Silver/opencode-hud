@@ -58,14 +58,14 @@ test("fetchQuota：归一化匹配 fetcher 并透传 apiUrl/key", async () => {
       fetch: async (apiUrl: string, key: string) => {
         seenApiUrl = apiUrl
         seenKey = key
-        return { rolling: { status: "ok", percent: 42 } }
+        return { items: [{ label: "5h", percent: 42 }] }
       },
     },
   ])
   const url = "https://example.test/v1/usage"
   for (const pid of ["test-go", "test_go", "Test-Go", "testgo"]) {
     const usage = await reg.fetchQuota(pid, url, "k-secret")
-    assert.equal(usage?.rolling?.percent, 42, `应为命中: ${pid}`)
+    assert.equal(usage?.items[0]?.percent, 42, `应为命中: ${pid}`)
     assert.equal(seenApiUrl, url)
     assert.equal(seenKey, "k-secret")
   }

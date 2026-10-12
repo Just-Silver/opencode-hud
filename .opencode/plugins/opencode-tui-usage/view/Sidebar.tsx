@@ -15,7 +15,7 @@ import {
   resolveProviderID,
 } from "../model/usage.ts"
 import { getQuotaStore, QUOTA_REFRESH_MS, type QuotaDeps } from "../model/quota.ts"
-import { fetchQuota, getProviderApiUrl, isQuotaProvider } from "../quota/index.ts"
+import { fetchQuota, getProviderApiUrl, getProviderRenderer, isQuotaProvider } from "../quota/index.ts"
 import { resolveProviderKey } from "../quota/key.ts"
 import { pluginDataDir } from "../shared/paths.ts"
 import { checkForUpdate, type UpdateInfo } from "../update/index.ts"
@@ -169,7 +169,7 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
                 limit={limit()}
                 cacheRate={cacheRate()}
               />
-              <QuotaSection quota={quota()} />
+              <QuotaSection quota={quota()} renderer={getProviderRenderer(providerID() ?? "")} />
             </box>
           )}
         </Show>

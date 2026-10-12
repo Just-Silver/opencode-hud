@@ -1,5 +1,5 @@
 // ─── 共享/帮助函数：展示格式化（纯函数，全层可引用） ───
-import type { QuotaWindow } from "../model/types.ts"
+import type { QuotaItem } from "../model/types.ts"
 
 // token 数：123.6k / 200k / 28.4k
 export function fmtTokens(v: number): string {
@@ -60,6 +60,13 @@ export function padStartVisual(s: string, width: number): string {
   return pad > 0 ? " ".repeat(pad) + s : s
 }
 
+// 按终端显示列数右补空格（CJK 按 2 列）：用于定宽左对齐列（图标/前缀对齐，如 "↻"）。
+// 与 padStartVisual 一样保证列宽固定（bar 等长），只是内容贴左。
+export function padEndVisual(s: string, width: number): string {
+  const pad = width - visualWidth(s)
+  return pad > 0 ? s + " ".repeat(pad) : s
+}
+
 // 满宽分隔线：1 行 "─" 铺满 width 个终端列。用于区块标题下方的独立分隔线。
 export function dividerLine(width: number): string {
   return "─".repeat(Math.max(1, Math.floor(width)))
@@ -74,9 +81,10 @@ export function fmtPctInt(v: number | undefined): string {
   return `${Math.max(0, Math.min(100, v))}%` // 越界 clamp，防脏数据
 }
 
-// 从额度窗口取可展示百分比：仅 status="ok" 且 percent 为数字
-export function quotaPct(w: QuotaWindow | undefined): number | undefined {
-  return w?.status === "ok" && typeof w.percent === "number" ? w.percent : undefined
+// 条目可展示百分比：有限数字才画进度条（provider 只在有效时给 percent）
+export function quotaPct(item: QuotaItem | undefined): number | undefined {
+  const p = item?.percent
+  return typeof p === "number" && Number.isFinite(p) ? p : undefined
 }
 
 // ── 额度窗口重置时间（ISO 字符串）→ 短文本（本地时区） ──
@@ -95,4 +103,11 @@ export function fmtResetTime(iso: string | undefined, now: Date = new Date()): s
   }
   if (diff < 7 * 24 * 3600_000) return `周${WEEKDAY_CN[t.getDay()]}`
   return `${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`
+}
+
+// 额度重置提示（含刷新图标前缀）：fmtResetTime 有值时返回 "↻ 02:28"，否则 undefined。
+// 供 provider 生成 QuotaItem.hint 用（图标在 shared 统一，宽度由 charColumns 按 2 列计）。
+export function fmtResetHint(iso: string | undefined, now: Date = new Date()): string | undefined {
+  const t = fmtResetTime(iso, now)
+  return t ? `↻ ${t}` : undefined
 }

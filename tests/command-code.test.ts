@@ -1,9 +1,13 @@
 // ─── quota/command-code.ts mapCommandCode 单元测试（离线，零网络） ───
-// 注意：Command Code 注册暂注释（等待真实订阅数据），此处只管纯转换函数；
-// fetchCommandCode 的网络路径取消注册后可手动验证。
+// 契约：QuotaData = { items: QuotaItem[] }（标签/顺序由 provider 定义）
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { mapCommandCode } from "../.opencode/plugins/opencode-tui-usage/quota/providers/command-code.ts"
+import type { QuotaData } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
+
+// 按标签取百分比（条目顺序由 provider 决定，断言按语义取）
+const pct = (q: QuotaData | undefined, label: string): number | undefined =>
+  q?.items.find((i) => i.label === label)?.percent
 
 // 构造有数据的正常响应
 const creditsWithData = {
@@ -19,9 +23,11 @@ test("正常数据：三窗口百分比正确（planId 命中映射 → 月度�
   // monthly: cap=70(goat), 已用=70-28=42 → 42/70=60%
   const q = mapCommandCode(creditsWithData, subGoat)
   assert.deepEqual(q, {
-    rolling: { status: "ok", percent: 19 },
-    weekly: { status: "ok", percent: 21 },
-    monthly: { status: "ok", percent: 60 },
+    items: [
+      { label: "5h", percent: 19 },
+      { label: "周", percent: 21 },
+      { label: "月", percent: 60 },
+    ],
   })
 })
 
@@ -33,11 +39,11 @@ test("窗口 used>cap：clamp 到 100", () => {
     },
     subGoat,
   )
-  assert.equal(q?.rolling?.percent, 100)
-  assert.equal(q?.weekly?.percent, 100)
+  assert.equal(pct(q, "5h"), 100)
+  assert.equal(pct(q, "周"), 100)
 })
 
-test("窗口字段缺失/为 null → 对应窗口 undefined", () => {
+test("窗口字段缺失/为 null → 对应条目缺失", () => {
   const q = mapCommandCode(
     {
       credits: { monthlyCredits: 10 },
@@ -45,41 +51,41 @@ test("窗口字段缺失/为 null → 对应窗口 undefined", () => {
     },
     subGoat,
   )
-  assert.equal(q?.rolling, undefined)
-  assert.equal(q?.weekly, undefined)
-  assert.equal(q?.monthly?.percent, 85.7) // 月窗口不受影响：(70-10)/70 = 85.7 → 保留一位小数
+  assert.equal(pct(q, "5h"), undefined)
+  assert.equal(pct(q, "周"), undefined)
+  assert.equal(pct(q, "月"), 85.7) // 月窗口不受影响：(70-10)/70 = 85.7 → 保留一位小数
 })
 
-test("subscriptions data=null → monthly undefined，5h/周照常", () => {
+test("subscriptions data=null → 月缺失，5h/周照常", () => {
   const q = mapCommandCode(creditsWithData, { success: true, data: null })
-  assert.deepEqual(q?.monthly, undefined)
-  assert.equal(q?.rolling?.percent, 19)
-  assert.equal(q?.weekly?.percent, 21)
+  assert.equal(pct(q, "月"), undefined)
+  assert.equal(pct(q, "5h"), 19)
+  assert.equal(pct(q, "周"), 21)
 })
 
 test("subscriptions 失败降级（undefined 传入）→ 5h/周照常", () => {
   const q = mapCommandCode(creditsWithData, undefined)
-  assert.equal(q?.rolling?.percent, 19)
-  assert.equal(q?.weekly?.percent, 21)
-  assert.equal(q?.monthly, undefined)
+  assert.equal(pct(q, "5h"), 19)
+  assert.equal(pct(q, "周"), 21)
+  assert.equal(pct(q, "月"), undefined)
 })
 
-test("planId 未知 → monthly undefined（映射未命中静默）", () => {
+test("planId 未知 → 月缺失（映射未命中静默）", () => {
   const q = mapCommandCode(creditsWithData, { success: true, data: { planId: "individual-hype-tier" } })
-  assert.equal(q?.monthly, undefined)
-  assert.equal(q?.rolling?.percent, 19)
+  assert.equal(pct(q, "月"), undefined)
+  assert.equal(pct(q, "5h"), 19)
 })
 
-test("余额异常（>cap）→ monthly undefined", () => {
+test("余额异常（>cap）→ 月缺失", () => {
   const q = mapCommandCode(
     { credits: { monthlyCredits: 999 }, windowLimits: { fiveHour: { used: 1, cap: 100 } } },
     subGoat,
   )
-  assert.equal(q?.monthly, undefined)
-  assert.equal(q?.rolling?.percent, 1)
+  assert.equal(pct(q, "月"), undefined)
+  assert.equal(pct(q, "5h"), 1)
 })
 
-test("实测空账户真空用例：credits 全 0 + windowLimits 全 null + data null → 空 QuotaData", () => {
+test("实测空账户真空用例：credits 全 0 + windowLimits 全 null + data null → undefined", () => {
   const q = mapCommandCode(
     {
       credits: { belowThreshold: false, creditThreshold: 0, monthlyCredits: 0, purchasedCredits: 0, freeCredits: 0 },
@@ -98,9 +104,9 @@ test("小用量：保留一位小数（真实场景 0.05/14 → 0.4）", () => {
     },
     { success: true, data: { planId: "individual-goat" } },
   )
-  assert.equal(q?.rolling?.percent, 0.4) // 0.0508/14 = 0.36% → 0.4
-  assert.equal(q?.weekly?.percent, 0.1) // 0.0508/35 = 0.15% → 0.1
-  assert.equal(q?.monthly?.percent, 0.1) // (70-69.949)/70 = 0.07% → 0.1
+  assert.equal(pct(q, "5h"), 0.4) // 0.0508/14 = 0.36% → 0.4
+  assert.equal(pct(q, "周"), 0.1) // 0.0508/35 = 0.15% → 0.1
+  assert.equal(pct(q, "月"), 0.1) // (70-69.949)/70 = 0.07% → 0.1
 })
 
 test("完全空响应/undefined → undefined", () => {

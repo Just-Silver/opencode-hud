@@ -4,7 +4,7 @@ import assert from "node:assert/strict"
 import { QuotaStore, type QuotaDeps } from "../.opencode/plugins/opencode-tui-usage/model/quota.ts"
 import type { QuotaData } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
 
-const okData: QuotaData = { rolling: { status: "ok", percent: 42 } }
+const okData: QuotaData = { items: [{ label: "5h", percent: 42 }] }
 
 function makeDeps(overrides: Partial<QuotaDeps> = {}): QuotaDeps & {
   fetchCalls: Array<{ pid: string; apiUrl: string; key: string }>
@@ -161,5 +161,5 @@ test("force：限流窗口内仍真请求；非 force 被限流跳过", async ()
   assert.equal(deps.fetchCalls.length, 1)
   await store.load("opencode-go", { force: true }) // force：跳过限流，真请求
   assert.equal(deps.fetchCalls.length, 2)
-  assert.equal(store.get("opencode-go")?.rolling?.percent, 42)
+  assert.equal(store.get("opencode-go")?.items[0]?.percent, 42)
 })

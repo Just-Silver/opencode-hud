@@ -33,6 +33,6 @@ async function discoverProviders(): Promise<ProviderRegistration[]> {
 // 不做兜底（如扫描失败退回显式注册单个供应商）——加载失败直接抛出，暴露问题，避免静默降级。
 const registered: ProviderRegistration[] = await discoverProviders()
 
-const { isQuotaProvider, getProviderApiUrl, fetchQuota } = createRegistry(registered)
+const { isQuotaProvider, getProviderApiUrl, getProviderRenderer, fetchQuota } = createRegistry(registered)
 
-export { isQuotaProvider, getProviderApiUrl, fetchQuota }
+export { isQuotaProvider, getProviderApiUrl, getProviderRenderer, fetchQuota }

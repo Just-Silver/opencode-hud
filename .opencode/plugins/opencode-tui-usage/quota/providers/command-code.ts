@@ -4,7 +4,7 @@
 //   2. /alpha/billing/subscriptions  → planId → 套餐映射表推月度上限（API 只给余额不给上限）
 // 状态：**已启用**（离线测试与真实数据实测通过）
 // 脱敏：本模块不记日志；key 仅用于 Authorization 请求头。
-import type { QuotaData } from "../../model/types.ts"
+import type { QuotaData, QuotaItem } from "../../model/types.ts"
 import type { ProviderRegistration } from "../registry.ts"
 
 export const COMMANDCODE_CREDITS_URL = "https://api.commandcode.ai/alpha/billing/credits"
@@ -38,29 +38,31 @@ function windowPct(w: { used?: number; cap?: number } | null | undefined): numbe
   return Math.max(0, Math.min(100, Math.round((w.used / w.cap) * 1000) / 10))
 }
 
-// 纯转换函数（离线可测）：credits + subscriptions 响应 → QuotaData
-// 降级策略：subscriptions 失败 / data=null / planId 未知 → 仅 monthly 缺失，5h/周照常
+// 纯转换函数（离线可测）：credits + subscriptions 响应 → 条目列表（标签与顺序在此定义）
+// 降级策略：subscriptions 失败 / data=null / planId 未知 → 仅月条目缺失，5h/周照常
 export function mapCommandCode(creditsResp: unknown, subResp: unknown): QuotaData | undefined {
   const c = (creditsResp ?? {}) as CreditsResp
   const s = (subResp ?? {}) as SubscriptionsResp
-  const out: QuotaData = {}
+  const items: QuotaItem[] = []
 
   const rolling = windowPct(c.windowLimits?.fiveHour)
-  if (rolling !== undefined) out.rolling = { status: "ok", percent: rolling }
+  if (rolling !== undefined) items.push({ label: "5h", percent: rolling })
 
   const weekly = windowPct(c.windowLimits?.weekly)
-  if (weekly !== undefined) out.weekly = { status: "ok", percent: weekly }
+  if (weekly !== undefined) items.push({ label: "周", percent: weekly })
 
   // 月度：cap = PLAN_CREDITS[planId]；已用 = cap − 余额；余额异常（>cap）不显示
   const cap = s.data?.planId ? PLAN_CREDITS[s.data.planId] : undefined
   const balance = typeof c.credits?.monthlyCredits === "number" ? c.credits.monthlyCredits : undefined
   if (cap !== undefined && cap > 0 && balance !== undefined && balance <= cap) {
     const used = cap - balance
-    out.monthly = { status: "ok", percent: Math.max(0, Math.min(100, Math.round((used / cap) * 1000) / 10)) }
+    items.push({
+      label: "月",
+      percent: Math.max(0, Math.min(100, Math.round((used / cap) * 1000) / 10)),
+    })
   }
 
-  if (out.rolling === undefined && out.weekly === undefined && out.monthly === undefined) return undefined
-  return out
+  return items.length > 0 ? { items } : undefined
 }
 
 // 主入口（兼容 fetchers 分发签名）：apiUrl = credits 端点（由 getProviderApiUrl 提供）
@@ -89,6 +91,7 @@ export async function fetchCommandCode(apiUrl: string, key: string): Promise<Quo
 export const provider: ProviderRegistration = {
   id: "command-code",
   apiUrl: COMMANDCODE_CREDITS_URL,
+  render: "bars",
   fetch: fetchCommandCode,
   enabled: true,
 }

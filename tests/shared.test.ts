@@ -1,7 +1,7 @@
 // ─── shared/ 共享帮助函数单元测试 ───
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { dividerLine, fmtPct, fmtPctInt, fmtResetTime, fmtTokens, padStartVisual, quotaPct, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-tui-usage/shared/format.ts"
+import { dividerLine, fmtPct, fmtPctInt, fmtResetHint, fmtResetTime, fmtTokens, padEndVisual, padStartVisual, quotaPct, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-tui-usage/shared/format.ts"
 import { normID } from "../.opencode/plugins/opencode-tui-usage/shared/id.ts"
 import { parseJson } from "../.opencode/plugins/opencode-tui-usage/shared/jsonc.ts"
 
@@ -54,9 +54,10 @@ test("fmtPct / sharePct / fmtPctInt / quotaPct", () => {
   assert.equal(fmtPctInt(Infinity), "")
   assert.equal(fmtPctInt(150), "100%") // clamp 越界
   assert.equal(fmtPctInt(-5), "0%")
-  assert.equal(quotaPct({ status: "ok", percent: 42 }), 42)
-  assert.equal(quotaPct({ status: "fail", percent: 42 }), undefined)
-  assert.equal(quotaPct({ status: "ok" }), undefined)
+  assert.equal(quotaPct({ label: "5h", percent: 42 }), 42)
+  assert.equal(quotaPct({ label: "5h" }), undefined)
+  assert.equal(quotaPct({ label: "5h", percent: NaN }), undefined)
+  assert.equal(quotaPct({ label: "余额", text: "$1" }), undefined)
   assert.equal(quotaPct(undefined), undefined)
 })
 
@@ -80,6 +81,14 @@ test("padStartVisual：按显示列左补空格（CJK 算 2 列）", () => {
   assert.equal(padStartVisual("abcdefg", 6), "abcdefg") // 超宽不截断
 })
 
+// ─── padEndVisual：按显示列定宽左对齐 ───
+test("padEndVisual：按显示列右补空格（图标/前缀对齐列）", () => {
+  assert.equal(padEndVisual("↻ 02:28", 8), "↻ 02:28") // 8 列 → 不补
+  assert.equal(padEndVisual("↻ 周一", 8), "↻ 周一 ") // 7 列 → 补 1（尾空格）
+  assert.equal(padEndVisual("", 8), "        ")
+  assert.equal(padEndVisual("abcdefghi", 8), "abcdefghi") // 超宽不截断
+})
+
 // ─── dividerLine：分隔线宽度 ───
 test("dividerLine：按宽度重复，最少 1 个字符", () => {
   assert.equal(dividerLine(30), "─".repeat(30))
@@ -100,4 +109,14 @@ test("fmtResetTime：<24h 时刻 / <7d 周X / 否则 MM-DD / 异常与过期不�
   assert.equal(fmtResetTime(undefined, now), undefined)
   assert.equal(fmtResetTime("nope", now), undefined)
   assert.equal(fmtResetTime(new Date(now.getTime() - 1000).toISOString(), now), undefined) // 已过期
+})
+
+// ─── fmtResetHint：重置时间 + ↻ 前缀（provider 生成 QuotaItem.hint 用） ───
+test("fmtResetHint：有值时加 ↻ 前缀，无值/过期 → undefined", () => {
+  const now = new Date(2026, 9, 12, 10, 0, 0)
+  const at3h = new Date(now.getTime() + 3 * 3600_000)
+  assert.equal(fmtResetHint(at3h.toISOString(), now), "↻ 13:00")
+  assert.equal(fmtResetHint(undefined, now), undefined)
+  assert.equal(fmtResetHint("nope", now), undefined)
+  assert.equal(fmtResetHint(new Date(now.getTime() - 1000).toISOString(), now), undefined)
 })
