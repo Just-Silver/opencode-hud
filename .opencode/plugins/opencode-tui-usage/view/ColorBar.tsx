@@ -13,8 +13,12 @@ export function ColorBar(props: { pct: number | undefined; color: string }): JSX
   return (
     <Show when={props.pct !== undefined}>
       <box flexDirection="row" flexGrow={1} flexShrink={0} minWidth={0} height={1} backgroundColor={TRACK_COLOR}>
-        <box backgroundColor={props.color} flexGrow={clamped(props.pct)} flexShrink={0} />
-        <box flexGrow={100 - clamped(props.pct)} flexShrink={0} />
+        {/* 仅 >0 才渲染填充块：OpenTUI 里 flexGrow=0 的 box 仍占最小 1 格（minWidth={0} 不足以归零）
+            → 0% 会露出绿点，故用 Show 门控，0% 时整条只剩轨道色 */}
+        <Show when={clamped(props.pct) > 0}>
+          <box backgroundColor={props.color} flexGrow={clamped(props.pct)} flexShrink={0} minWidth={0} />
+        </Show>
+        <box flexGrow={100 - clamped(props.pct)} flexShrink={0} minWidth={0} />
       </box>
     </Show>
   )

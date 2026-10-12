@@ -1,7 +1,7 @@
 // ─── 模型层：数据模型类型（UI 与查询服务契约的唯一真源） ───
 
 // 额度窗口（5h/周/月 之一）
-export type QuotaWindow = { status?: string; percent?: number }
+export type QuotaWindow = { status?: string; percent?: number; resetsAt?: string }
 
 // 供应商额度数据（fetcher 输出 / UI 输入）
 export type QuotaData = { rolling?: QuotaWindow; weekly?: QuotaWindow; monthly?: QuotaWindow }

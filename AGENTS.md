@@ -58,3 +58,5 @@
 - **行宽测量**：`ref` + `onSizeChange` → `rowWidth` signal → 字符线按测量宽 repeat（首帧 0 时 `dividerLine` 返回最少 1 个字符）
 - **数值行**：`box flexDirection="row"` = label + `flexGrow` 垫片 + 右对齐 value/share 列；数值列是纯 ASCII，用 `padStart` 定宽右对齐即可，**中文标签不需要 visualWidth**（flex 垫片自动处理）。仅摘要等含 CJK 的字符串拼接才需要 `visualWidth`（`shared/format.ts`，纯函数可单测；`dividerLine` 同）
 - **无数据区块整块不渲染**：额度供应商不在白名单（如 deepseek）时，额度区块连标题/分隔线都不显示（不给「不支持」提示——用户明确要求不显示）
+- **额度行显示窗口重置时间**：`resetsAt` → `fmtResetTime`（`shared/format.ts` 纯函数，本地时区）：<24h 显示时刻 `HH:MM`、<7d 显示 `周X`、否则 `MM-DD`；缺失/非法/已过期一律不显示。**重置列必须定宽右对齐**（`padStartVisual` 按显示列补空格，宽 8 列 = `↻`(2) + 空格(1) + 5）：flex 行里进度条 `flexGrow` 吸收剩余宽度，右侧列宽度不固定会让各行进度条长度漂移、列错位；任一行有 `resetsAt` 才出该列（全无则不占宽度，如 Command Code）。标记 `↻`(U+21BB) 属宽度歧义字符：等宽字体无半宽字形、实际占 2 列，故 `charColumns` 特判为 2 列（按 1 列算字形会被裁一半）— 加新符号/emoji 时同样要按终端实际渲染宽度核对
+- **进度条 0% 不渲染填充块**：OpenTUI 里 `flexGrow=0` 的 box 仍占最小 1 格（`minWidth={0}` 不足以归零），故 `ColorBar` 用 `Show when={clamped(pct) > 0}` 门控填充块，0% 时整条只剩轨道色
