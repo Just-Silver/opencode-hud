@@ -3,6 +3,16 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [3.0.0] - 2026-10-12
+
+
+### 新功能
+
+- 额度展示改为数据驱动 + 共享渲染器层（供应商自选渲染形态）（破坏性变更）
+
+### 杂项
+
+- 更新 CHANGELOG 到 v2.4.0
 ## [2.4.0] - 2026-10-12
 
 
