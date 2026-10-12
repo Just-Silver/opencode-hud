@@ -4,15 +4,27 @@
 //             → 全局配置（XDG_CONFIG_HOME 或 ~/.config）→ DB credential 表（兜底）
 // 脱敏约束：本模块不记任何日志，错误信息不得包含 key；
 //           key 仅存于内存 keyCache 与调用方请求头，不落盘、不上报。
+// DB 兜底覆盖两种登录形态（判别依据 = 官方 Credential.Value 的 type 字段，packages/schema/src/credential.ts）：
+//   type:"key"   → API key 连接（/connect 粘贴 key），凭据归 provider 自己（官方 keyProvider = provider）；
+//   type:"oauth" → Console 登录（auth login device flow），凭据归 Console 集成 "opencode"
+//                  （官方 consoleIntegration()：opencode / opencode-go 共用同一次登录）；
+//   type:"external" 等 → 凭据由外部托管，本模块不处理。
+// 插件只读现值、不做 refresh / expires 处理（token 过期由 opencode 自身刷新写回 DB）。
 import { readFileSync } from "fs"
 import { homedir } from "os"
 import { dirname, join, resolve } from "path"
 import { parseJson } from "../shared/jsonc.ts"
+import { normID } from "../shared/id.ts"
 
 const OPENCODE_DATA_DIR_NAME = "opencode" // opencode 数据目录名
 const OPENCODE_DATA_DIR_REL = [".local", "share", "opencode"] // ~ 下相对路径
 const OPENCODE_DB_FILE = "opencode.db"
 const CREDENTIAL_SQL = "SELECT value FROM credential WHERE integration_id = ?"
+
+// Console 集成（对齐官方 packages/app/src/providers/connect/controller.ts）：
+// opencode / opencode-go 均通过 OpenCode Console 登录，OAuth 凭据统一写入 integration_id = "opencode"。
+const CONSOLE_INTEGRATION_ID = "opencode"
+const CONSOLE_PROVIDER_NORMS = new Set(["opencode", "opencodego"]) // normID 归一化写法（兼容 opencode_go 等）
 
 const keyCache = new Map<string, string>()
 
@@ -85,7 +97,35 @@ export function resolveApiKeyFromConfig(
   return undefined
 }
 
-// DB credential 表（对应 opencode auth login 写入的凭据），作为配置之后的兜底
+// DB credential 候选 integration_id，按「API key 归自己 → OAuth 归 Console」顺序：
+// 官方 dialog.tsx：OAuth 登录 provider = consoleIntegration(pid)，API key keyProvider = pid。
+// 纯函数（node 可测）：非 Console 供应商原样返回；已是 Console id 不重复追加。
+export function credentialIntegrationIDs(providerID: string): string[] {
+  const ids = [providerID]
+  if (providerID !== CONSOLE_INTEGRATION_ID && CONSOLE_PROVIDER_NORMS.has(normID(providerID))) {
+    ids.push(CONSOLE_INTEGRATION_ID)
+  }
+  return ids
+}
+
+// 凭据取值：按官方 Credential.Value 的 type 判别（key → key；oauth → access；其余不处理）。
+// 纯函数（node 可测）：本模块只读现值，不碰 refresh / expires。
+export function pickCredentialToken(value: unknown): string | undefined {
+  if (typeof value !== "object" || value === null) return undefined
+  const v = value as Record<string, unknown>
+  switch (v.type) {
+    case "key":
+      return typeof v.key === "string" ? v.key : undefined
+    case "oauth":
+      return typeof v.access === "string" ? v.access : undefined
+    default:
+      return undefined
+  }
+}
+
+// DB credential 表（对应 opencode 登录/连接写入的凭据），作为配置之后的兜底。
+// 遍历候选 integration_id（API key 归 provider 自己、OAuth 归 Console "opencode"），
+// 命中第一个可取值即返回；不处理 refresh / expires（过期由 opencode 自身刷新写回）。
 async function readDbKey(providerID: string): Promise<string | undefined> {
   try {
     const { Database } = await import("bun:sqlite")
@@ -93,12 +133,17 @@ async function readDbKey(providerID: string): Promise<string | undefined> {
       ? join(process.env.XDG_DATA_HOME, OPENCODE_DATA_DIR_NAME)
       : join(homedir(), ...OPENCODE_DATA_DIR_REL)
     const db = new Database(join(base, OPENCODE_DB_FILE), { readonly: true })
-    const row = db.query(CREDENTIAL_SQL).get(providerID) as { value?: string } | undefined
-    db.close()
-    if (!row?.value) return
-    const parsed = JSON.parse(row.value)
-    if (typeof parsed.key === "string") return parsed.key
-    return
+    try {
+      for (const id of credentialIntegrationIDs(providerID)) {
+        const row = db.query(CREDENTIAL_SQL).get(id) as { value?: string } | undefined
+        if (!row?.value) continue
+        const key = pickCredentialToken(JSON.parse(row.value))
+        if (key) return key
+      }
+      return
+    } finally {
+      db.close()
+    }
   } catch {
     return // 静默：读取失败视为无凭据，由调用方统一记录 missing key；不暴露错误细节
   }

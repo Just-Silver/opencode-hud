@@ -10,6 +10,8 @@ import assert from "node:assert/strict"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
+  credentialIntegrationIDs,
+  pickCredentialToken,
   resolveApiKeyFromConfig,
   resolveProviderKey,
 } from "../.opencode/plugins/opencode-tui-usage/quota/key.ts"
@@ -96,4 +98,22 @@ test("resolveProviderKey 无凭据 → undefined（DB 不可用时静默跳过�
 
 test("resolveProviderKey 空 pid → undefined", async () => {
   assert.equal(await resolveProviderKey("", { cwd: projectDir }), undefined)
+})
+
+// ─── DB 凭据候选与取值（纯函数；对齐官方 consoleIntegration / Credential.Value） ───
+test("credentialIntegrationIDs：opencode-go 追加 Console 登录 id", () => {
+  assert.deepEqual(credentialIntegrationIDs("opencode-go"), ["opencode-go", "opencode"])
+  assert.deepEqual(credentialIntegrationIDs("opencodego"), ["opencodego", "opencode"]) // 归一化写法
+  assert.deepEqual(credentialIntegrationIDs("opencode"), ["opencode"]) // 已是 Console id，不重复
+  assert.deepEqual(credentialIntegrationIDs("anthropic"), ["anthropic"]) // 非 Console 供应商
+})
+
+test("pickCredentialToken：按 type 取 key / access，external 等不处理", () => {
+  assert.equal(pickCredentialToken({ type: "key", key: "sk-1" }), "sk-1")
+  assert.equal(pickCredentialToken({ type: "oauth", access: "at-2", refresh: "rt", expires: 1 }), "at-2")
+  assert.equal(pickCredentialToken({ type: "external", methodID: "azure-cli" }), undefined)
+  assert.equal(pickCredentialToken({ type: "key" }), undefined) // 缺字段
+  assert.equal(pickCredentialToken({ type: "oauth" }), undefined)
+  assert.equal(pickCredentialToken(null), undefined)
+  assert.equal(pickCredentialToken("nope"), undefined)
 })

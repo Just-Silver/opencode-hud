@@ -43,6 +43,8 @@
 - 功能开关一览：`TUI_USAGE_PROBE=1` 探针文件日志（默认关，见「运行与验证」日志行）；供应商级 `enabled: false` 跳过白名单（新供应商待验期间用）
 - Command Code 已启用（`quota/providers/command-code.ts`：`mapCommandCode` 纯函数 + `fetchCommandCode` 双 API，`enabled: true`）；测试 `tests/command-code.test.ts` 离线覆盖转换逻辑
 - 凭据解析统一在 `quota/key.ts`：`resolveProviderKey(pid)` 顺序 keyCache → 项目配置（近→远，同目录 `.opencode/` 优先）→ 全局配置（XDG_CONFIG_HOME 优先）→ DB credential 表兜底；支持 V2 `providers.{id}.settings.apiKey` / V1 `provider.{id}.options.apiKey` 与 `{env:VAR}` 占位符，模块零日志（脱敏：key 不落盘、不上报）
+- **DB 兜底覆盖两种登录形态**（判别 = 官方 `Credential.Value` 的 `type` 字段，`packages/schema/src/credential.ts`）：`type:"key"`（`/connect` 粘贴 key，凭据归 provider 自己 = 官方 `keyProvider`）取 `key`；`type:"oauth"`（`auth login` Console device flow）取 `access`；`type:"external"` 等不处理。**Console 供应商（`opencode`/`opencode-go`）的 OAuth 凭据统一写在 `integration_id = "opencode"` 下**（官方 `consoleIntegration()`），故 DB 查询按 `credentialIntegrationIDs(pid) = [pid, consoleIntegration(pid)]` 顺序（`opencode-go` → `opencode`，`normID` 归一化兼容 `opencode_go`）。**插件只读现值、不刷新**：不碰 `refresh`/`expires`，token 过期由 opencode 自身刷新写回 DB（过期时查询失败与模型访问失败同因）
+- **auth 登录额度已实测打通（2026-10-12）**：Console 登录的 `access`（DB `type=oauth`/`method=device`）可直接调用 `https://opencode.ai/zen/go/v1/usage`（200，返回 `rolling/weekly/monthly` + `resetsAt`）；Zen 侧 `https://opencode.ai/zen/v1/usage` 为 404（按量计费无窗口端点，故 `opencode` 不入白名单）。修前 `providerID=opencode-go` 因凭据挂 `opencode` 名下而落 `missing key` → 额度不显示
 
 # UI 硬约束（Solid 响应式）
 - **组件函数体只执行一次**：禁止 `const q = props.xxx` 这类 props 快照 const——挂载后 props 更新不生效（历史 bug：QuotaSection/UsageSection/ColorBar 均踩过，额度不显示、压缩上下文后进度条不刷新皆源于此）
