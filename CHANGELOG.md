@@ -3,6 +3,24 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [2.4.0] - 2026-10-12
+
+
+### 修复
+
+- 额度凭据支持 Console 登录（OAuth）与 integration 映射
+
+### 新功能
+
+- 额度行显示窗口重置时间（resetsAt）+ 进度条与对齐修复
+
+### 杂项
+
+- 更新 CHANGELOG 到 v2.3.1
+
+### 重构
+
+- 额度端点常量归位供应商文件，移除 registry 冗余与兜底
 ## [2.3.1] - 2026-10-09
 
 
