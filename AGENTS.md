@@ -26,6 +26,10 @@
 - 校验：单元测试 `node --test tests/*.test.ts`（node ≥23.6 原生 TS strip，零依赖；11 个文件：key/quota/model/quota-store/shared/command-code/opencode-go/renderers/discovery/update/update-apply，全部须过）；改后打包语法检查用 esbuild：`npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --outfile=$env:TEMP\opencode\tui-bundle-check.js`（`Done in` 即通过）；`opencode` 启动侧边栏无 `sidebar.content` 崩溃即正常
 - 官方源码速查：v2 仓库 = `sst/opencode`（TS monorepo，**`opencode-ai/opencode` 已归档勿用**）；日志实现 `packages/core/src/observability/logging.ts`（`Logger.toFile(..., { flag: "a" })`，**opencode.log 无轮转/截断/清理**）；查代码用 sparse clone 绕过 GitHub code search 对超大仓库的截断：`git clone --depth 1 --filter=blob:none --sparse <url> && git -C <dir> sparse-checkout set packages/core packages/tui`
 
+# 技能（`.opencode/skills/`）
+
+- `managing-quota-providers` —— 额度供应商**新增 / 修改 / 删除**的标准流程：先搜官方 API 出处（搜不到就停下问用户）→ 先查共享渲染器清单（`view/renderers/registry.ts` 的 `RENDERER_NAMES`）再决定复用还是新建 → 未用真实响应验证前 `enabled: false` → 删除供应商不动共享层（`view/renderers/*`、`QuotaSection`、`CHANGELOG`）。**改供应商相关代码前先加载该技能。**
+
 # opencode2 版本与插件加载
 - **当前推荐版本 `0.0.0-beta-19425`（2026-09-10）已实测可加载本插件**（本文档即修复于 19425）；**`2.0.15`（2026-09-24）亦实测可加载**（发现式；配置安装曾实测生效，但因 TUI 双 Solid 缺陷已回退，见「分发安装」）
 - 19425 双层变化（相对 18707，实测）：
