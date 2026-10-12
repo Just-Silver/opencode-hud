@@ -71,7 +71,7 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
 
   // ── 额度查询服务（单例；deps 的 log 首次创建时绑定 client） ──
   const store = quotaStore({
-    apiUrlFor: getProviderApiUrl, // 归一化查找：未注册供应商落 QUOTA_API_URL 兜底
+    apiUrlFor: getProviderApiUrl, // 归一化查找；未注册/未启用返回 undefined，由 QuotaStore 记 warn 跳过（无兜底）
     resolveKey: resolveProviderKey,
     fetch: fetchQuota,
     // TUI 插件无 app.log API（client 为 HTTP 客户端）；console 输出不可见（TUI 全屏），

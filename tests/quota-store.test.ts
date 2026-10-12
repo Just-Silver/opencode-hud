@@ -44,6 +44,15 @@ test("load missing key：记 warn、不写缓存、返回 false", async () => {
   assert.deepEqual(deps.logs, [{ level: "warn", message: "quota opencode-go missing key" }])
 })
 
+test("load missing api url：记 warn、不写缓存、返回 false", async () => {
+  const deps = makeDeps({ apiUrlFor: () => undefined })
+  const store = new QuotaStore(deps)
+  assert.equal(await store.load("opencode-go"), false)
+  assert.equal(store.get("opencode-go"), undefined)
+  assert.equal(deps.fetchCalls.length, 0)
+  assert.deepEqual(deps.logs, [{ level: "warn", message: "quota opencode-go missing api url" }])
+})
+
 test("load empty response：记 warn、不写缓存", async () => {
   const deps = makeDeps({ fetch: async () => undefined })
   const store = new QuotaStore(deps)

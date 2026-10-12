@@ -4,7 +4,8 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
-import { createRegistry, QUOTA_API_URL, type ProviderRegistration } from "../.opencode/plugins/opencode-tui-usage/quota/registry.ts"
+import { createRegistry, type ProviderRegistration } from "../.opencode/plugins/opencode-tui-usage/quota/registry.ts"
+import { QUOTA_API_URL } from "../.opencode/plugins/opencode-tui-usage/quota/providers/opencode-go.ts"
 import { resolveApiKeyFromConfig } from "../.opencode/plugins/opencode-tui-usage/quota/key.ts"
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures")
@@ -13,7 +14,7 @@ const projectDir = join(fixtures, "project")
 // 与 providers/opencode-go.ts 等价的静态注册（测试不动 glob，直接构造）
 const opencodeGo: ProviderRegistration = {
   id: "opencode-go",
-  apiUrl: "https://opencode.ai/zen/go/v1/usage",
+  apiUrl: QUOTA_API_URL,
   fetch: async () => undefined, // 本组测试不触发真实请求（分发/守卫逻辑与 fetch 实现无关）
 }
 
@@ -83,14 +84,14 @@ test("全链路：opencodego 写法从配置提取 key（fixture 覆盖）", () 
   assert.equal(resolveApiKeyFromConfig("opencodego", { cwd: projectDir }), "sk-oc-go-alias-0000")
 })
 
-// ─── getProviderApiUrl（归一化 URL 查找；Command Code 未启用前全部落 QUOTA_API_URL） ───
+// ─── getProviderApiUrl（归一化 URL 查找；未注册/未启用一律 undefined，无兜底） ───
 test("getProviderApiUrl：opencode-go 任意写法命中专属 URL", () => {
   const url = registry.getProviderApiUrl("opencode-go")
-  assert.equal(url, "https://opencode.ai/zen/go/v1/usage")
+  assert.equal(url, QUOTA_API_URL)
   assert.equal(registry.getProviderApiUrl("opencode_go"), url) // 归一化写法同样命中
 })
 
-test("getProviderApiUrl：未启用/无关 pid 落 QUOTA_API_URL 兜底", () => {
-  assert.equal(registry.getProviderApiUrl("command-code"), "https://opencode.ai/zen/go/v1/usage") // enabled:false 期兜底
-  assert.equal(registry.getProviderApiUrl("nope"), QUOTA_API_URL)
+test("getProviderApiUrl：未注册/未启用 pid → undefined（不兜底指向）", () => {
+  assert.equal(registry.getProviderApiUrl("command-code"), undefined) // 未注册
+  assert.equal(registry.getProviderApiUrl("nope"), undefined)
 })

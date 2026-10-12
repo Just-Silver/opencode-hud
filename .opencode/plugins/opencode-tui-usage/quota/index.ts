@@ -6,7 +6,7 @@
 import { readdirSync } from "fs"
 import { join } from "path"
 import { fileURLToPath } from "url"
-import { createRegistry, QUOTA_API_URL, type ProviderRegistration } from "./registry.ts"
+import { createRegistry, type ProviderRegistration } from "./registry.ts"
 
 function providersDir(): string {
   // ① 模块以磁盘 file:// 加载（bun/node 运行时加载源码的常规形态）
@@ -29,14 +29,10 @@ async function discoverProviders(): Promise<ProviderRegistration[]> {
   return out
 }
 
-// 顶层 await（ESM，bun/node 均支持）：模块加载时扫描一次；热重载重新 import → 重新扫描
-const registered: ProviderRegistration[] = await discoverProviders().catch(async () => {
-  // 防御兜底：模块非磁盘加载（如 blob）时退回显式注册，保证插件可用
-  const mod = (await import("./providers/opencode-go.ts")) as { provider?: ProviderRegistration }
-  const opencodeGo = mod.provider
-  return opencodeGo ? [opencodeGo] : []
-})
+// 顶层 await（ESM，bun/node 均支持）：模块加载时扫描一次；热重载重新 import → 重新扫描。
+// 不做兜底（如扫描失败退回显式注册单个供应商）——加载失败直接抛出，暴露问题，避免静默降级。
+const registered: ProviderRegistration[] = await discoverProviders()
 
 const { isQuotaProvider, getProviderApiUrl, fetchQuota } = createRegistry(registered)
 
-export { QUOTA_API_URL, isQuotaProvider, getProviderApiUrl, fetchQuota }
+export { isQuotaProvider, getProviderApiUrl, fetchQuota }

@@ -5,7 +5,7 @@ export const QUOTA_REFRESH_MS = 60_000 // 配额轮询间隔
 
 // 查询服务依赖（生产由入口注入真实实现，测试注入 mock）
 export interface QuotaDeps {
-  apiUrlFor(pid: string): string
+  apiUrlFor(pid: string): string | undefined
   resolveKey(pid: string): Promise<string | undefined>
   fetch(pid: string, apiUrl: string, key: string): Promise<QuotaData | undefined>
   log(level: "warn" | "error", message: string): void
@@ -52,6 +52,11 @@ export class QuotaStore {
     }
     const p = (async (): Promise<boolean> => {
       const apiUrl = this.deps.apiUrlFor(pid)
+      if (!apiUrl) {
+        this.at.set(pid, now)
+        this.deps.log("warn", `quota ${pid} missing api url`)
+        return false
+      }
       const key = await this.deps.resolveKey(pid)
       if (!key) {
         this.at.set(pid, now)
