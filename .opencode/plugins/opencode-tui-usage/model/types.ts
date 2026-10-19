@@ -35,3 +35,42 @@ export type MessageLike = {
   providerID?: string
   model?: { id?: string; providerID?: string }
 }
+
+// ── 性能指标（首字 / 速度） ──
+// v2 assistant 消息的子集：一条消息 = 一步，content 内含 text/reasoning/tool
+export type TokenLike = {
+  input?: number
+  output?: number
+  reasoning?: number
+  cache?: { read?: number; write?: number }
+}
+
+export type PartTime = { created?: number; ran?: number; completed?: number }
+
+export type PerfPart = {
+  type?: string
+  text?: string
+  time?: PartTime
+  state?: { status?: string; input?: unknown; time?: PartTime }
+}
+
+export type PerfMessage = {
+  id?: string
+  type?: string
+  time?: { created?: number; streamed?: number; completed?: number }
+  tokens?: TokenLike
+  model?: { id?: string; providerID?: string; variant?: string }
+  content?: PerfPart[]
+  error?: unknown
+}
+
+// ── 子代理 ──
+// 子会话在 SessionInfo 上的可用字段（宿主 session_v2 聚合列）
+export type SubagentInfo = {
+  id: string
+  agent?: string
+  title?: string
+  tokens?: TokenLike
+  model?: { id?: string; providerID?: string; variant?: string }
+  time?: { created?: number; updated?: number; idle?: number }
+}

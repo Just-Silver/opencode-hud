@@ -9,15 +9,23 @@ import { DIVIDER_COLOR, MUTED_COLOR, PRIMARY_COLOR } from "./theme.ts"
 
 const collapseState = new Map<string, boolean>()
 
+// 分隔线字符数：侧边栏内宽上限的量级即可，实际由 width="100%" 裁到容器宽度
+const FALLBACK_WIDTH = 80
+
 export function Collapsible(props: {
+  /** 折叠状态的 key，也是标题文字（须稳定，不要拼动态内容） */
   title: string
-  /** 折叠时显示在标题行右端的摘要（纯文本） */
+  /** 紧跟标题显示的动态内容（如指示灯），始终可见，且不参与折叠状态 key */
+  badge?: JSX.Element
+  /** 标题行右端、aside 左侧的操作按钮（如「全部收起」） */
+  actions?: JSX.Element
+  /** 标题行右端右对齐的补充信息（如合计），展开与折叠都显示 */
+  aside?: string
+  /** 折叠时显示在标题行右端的摘要（纯文本）；与 aside 同时给则 aside 优先 */
   summary?: string
   children: JSX.Element
 }): JSX.Element {
   const [isOpen, setIsOpen] = createSignal(collapseState.get(props.title) ?? true)
-  const [rowWidth, setRowWidth] = createSignal(0)
-  let rowEl: { width?: number } | undefined
 
   const toggle = () => {
     setIsOpen((v) => {
@@ -29,32 +37,32 @@ export function Collapsible(props: {
 
   return (
     <box flexDirection="column">
-      {/* 标题行：箭头 + 标题（折叠态摘要靠右）；行宽由父级决定，onSizeChange 测量 */}
-      <box
-        flexDirection="row"
-        gap={1}
-        onMouseDown={toggle}
-        ref={(el: { width?: number }) => {
-          rowEl = el
-        }}
-        onSizeChange={() => {
-          const w = rowEl?.width
-          if (typeof w === "number" && w > 0) setRowWidth(w)
-        }}
-      >
-        <text fg={MUTED_COLOR}>{() => (isOpen() ? "▼" : "▶")}</text>
+      {/* 标题行：箭头 + 标题（+ 紧跟的 badge），右端 aside */}
+      <box flexDirection="row" onMouseDown={toggle}>
+        <text fg={MUTED_COLOR}>{() => (isOpen() ? "▼ " : "▶ ")}</text>
         <text fg={PRIMARY_COLOR}>
           <b>{props.title}</b>
         </text>
-        <Show when={!isOpen() && props.summary}>
+        <Show when={props.badge}>{props.badge}</Show>
+        <Show when={props.actions || props.aside || (!isOpen() && props.summary)}>
           <box flexGrow={1} />
-          <text fg={MUTED_COLOR}>{props.summary}</text>
+          <Show when={props.actions}>{props.actions}</Show>
+          <Show when={props.actions && (props.aside || (!isOpen() && props.summary))}>
+            <text> </text>
+          </Show>
+          <Show when={props.aside || (!isOpen() && props.summary)}>
+            <text fg={MUTED_COLOR}>{props.aside ?? props.summary}</text>
+          </Show>
         </Show>
       </box>
-      {/* 标题下方的独立分隔线（字符线，1 行高，视觉纤细） */}
-      <text fg={DIVIDER_COLOR}>{dividerLine(rowWidth())}</text>
+      {/* 标题下方的独立分隔线（字符线，1 行高，视觉纤细）。
+          用 width="100%" 铺满，不做 onSizeChange 测量：首帧测得 0 时只画 1 个字符、
+          随后才撑满，切换会话/重建组件时会闪一下。字符数给足，超出部分由容器裁掉。 */}
+      <text fg={DIVIDER_COLOR} width="100%" wrapMode="none">
+        {dividerLine(FALLBACK_WIDTH)}
+      </text>
       <Show when={isOpen()}>
-        <box marginTop={1}>{props.children}</box>
+        <box>{props.children}</box>
       </Show>
     </box>
   )
