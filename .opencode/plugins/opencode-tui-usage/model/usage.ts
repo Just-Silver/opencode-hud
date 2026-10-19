@@ -23,11 +23,16 @@ export function aggregateUsage(messages: MessageLike[]): UsageData | undefined {
 }
 
 // 缓存率：cc-switch 口径 = read / (input + write + read)，一位小数
+// 抽成按分量计算，供会话聚合用量与子代理的 TokenLike 共用同一口径
+export function cacheRateOf(read: number, input: number, write: number): number | undefined {
+  const denom = input + write + read
+  if (denom <= 0) return
+  return Math.round((read / denom) * 1000) / 10
+}
+
 export function calcCacheRate(usage: UsageData | undefined): number | undefined {
   if (!usage) return
-  const denom = usage.input + usage.write + usage.read
-  if (denom <= 0) return
-  return Math.round((usage.read / denom) * 1000) / 10
+  return cacheRateOf(usage.read, usage.input, usage.write)
 }
 
 // 上下文的实际占用：取最新一条 assistant 消息的 tokens 求和

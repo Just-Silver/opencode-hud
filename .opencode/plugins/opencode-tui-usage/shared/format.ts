@@ -111,3 +111,45 @@ export function fmtResetHint(iso: string | undefined, now: Date = new Date()): s
   const t = fmtResetTime(iso, now)
   return t ? `↻ ${t}` : undefined
 }
+
+// ── 性能指标格式化 ──
+
+// 首字/耗时（秒）：0.83s / 1.23s，始终两位小数（与设计文档一致）
+export function fmtSec(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms)) return ""
+  return (ms / 1000).toFixed(2) + "s"
+}
+
+// 速度：≥10 取整、<10 一位小数（对齐宿主与 dsh 的格式约定）
+export function fmtTps(tps: number | undefined): string {
+  if (tps === undefined || !Number.isFinite(tps) || tps <= 0) return ""
+  const v = tps >= 10 ? Math.round(tps) : Math.round(tps * 10) / 10
+  return String(v)
+}
+
+// 子代理耗时（短格式）：42s / 1m10s / 1h02m
+export function fmtElapsed(ms: number | undefined): string {
+  if (ms === undefined || !Number.isFinite(ms) || ms < 0) return ""
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 60) return `${totalSec}s`
+  const minutes = Math.floor(totalSec / 60)
+  const seconds = totalSec % 60
+  if (minutes < 60) return `${minutes}m${String(seconds).padStart(2, "0")}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h${String(minutes % 60).padStart(2, "0")}m`
+}
+
+// 截断到 maxCols 显示列，超出加省略号（CJK 安全）
+export function truncateVisual(s: string, maxCols: number): string {
+  if (visualWidth(s) <= maxCols) return s
+  if (maxCols <= 1) return "…"
+  let out = ""
+  let w = 0
+  for (const c of s) {
+    const cw = charColumns(c)
+    if (w + cw > maxCols - 1) break
+    out += c
+    w += cw
+  }
+  return out + "…"
+}
