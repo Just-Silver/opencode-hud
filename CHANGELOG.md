@@ -3,6 +3,16 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [3.1.2] - 2026-10-20
+
+
+### 修复
+
+- 实时速度改用活动时长并修复工具前后掉值（v3.1.2）
+
+### 杂项
+
+- 更新 CHANGELOG 到 v3.1.1
 ## [3.1.1] - 2026-10-20
 
 
