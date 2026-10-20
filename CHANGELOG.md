@@ -3,6 +3,16 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [3.1.1] - 2026-10-20
+
+
+### 修复
+
+- 侧边栏用量改取宿主会话聚合列（v3.1.1）
+
+### 杂项
+
+- 更新 CHANGELOG 到 v3.1.0
 ## [3.1.0] - 2026-10-19
 
 
