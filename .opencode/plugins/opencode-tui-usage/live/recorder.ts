@@ -163,21 +163,25 @@ export function createRecorder(
         // 兜底：进程内没记到时，用消息里 reasoning/tool 的时间戳（历史加载路径）
         firstContentStart(last.content ?? [])
 
+      // 这一步已经结束（工具跑完、等下一步创建/首字）：交回精确值展示。
+      // 若继续用这条已完成消息重算，分母会跟着墙钟涨而分子不动，读数一路衰减。
+      if (typeof last.time?.completed === "number") return undefined
+
       const at = now()
       const parts = last.content ?? []
-      const isTool = runningTool(parts) !== undefined
+      const tool = runningTool(parts)
 
       // 工具执行中：分子分母同时停摆，直接返回「进入工具前一刻」的实时值。
       // 这个值必须在工具开始时由当前消息自身缓存，不能拿上一条消息的 carry
       // （否则当前步已有的速度被丢弃，冻结值往往变成 undefined → 界面回落精确值再切回）。
-      if (isTool) {
-        const frozen = freezeState.get(messageID)
+      if (tool) {
         return {
           phase: "tool",
           // 首字不需要冻结：它由 created/firstStart 决定，本就是常量
           ttftMs:
             firstStart !== undefined ? Math.max(0, firstStart - (last.time?.created ?? firstStart)) : undefined,
-          tps: frozen?.tps,
+          // 冻结值缺失时沿用本回合最近值，绝不能回落更早的精确样本（会表现为「一执行工具就掉」）
+          tps: freezeState.get(messageID)?.tps ?? previousPerf(messages, last.id)?.tps,
         }
       }
 

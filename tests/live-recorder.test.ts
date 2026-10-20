@@ -177,6 +177,40 @@ test("track：仅 running 时建心跳，转 idle 自动停", async () => {
   rec.dispose()
 })
 
+test("live：当前步已完成 → undefined（交回精确值，不跨步继续衰减）", () => {
+  const fake = fakeHost({
+    status: "running",
+    messages: [runningMessage({ time: { created: 1000, completed: 5000 } })],
+  })
+  const rec = createRecorder(fake.host, () => {}, { now: () => 9000 })
+  assert.equal(rec.live("s1"), undefined)
+  rec.dispose()
+})
+
+test("回归：工具相位没有冻结值时沿用本回合最近速度，不回落更早样本", () => {
+  const prev: PerfMessage = {
+    id: "m0",
+    type: "assistant",
+    time: { created: 100, completed: 4100 },
+    tokens: { output: 200 },
+    content: [{ type: "reasoning", text: "x", time: { created: 600 } }],
+  }
+  const withTool: PerfMessage = {
+    id: "m2",
+    type: "assistant",
+    time: { created: 5000 },
+    content: [
+      { type: "reasoning", text: "abc", time: { created: 5500 } },
+      { type: "tool", state: { status: "running" }, time: { created: 6000, ran: 6000 } },
+    ],
+  }
+  const fake = fakeHost({ status: "running", messages: [prev, withTool] })
+  const rec = createRecorder(fake.host, () => {}, { now: () => 8000 })
+  // 上一步 200 tok / 3500ms ≈ 57 tok/s
+  assert.equal(Math.round(rec.live("s1")!.tps!), 57)
+  rec.dispose()
+})
+
 // ── 冻结回归：工具执行期速度必须完全不动 ──
 test("回归：工具执行期速度完全冻结（不随 now 变化）", () => {
   let clock = 10_000

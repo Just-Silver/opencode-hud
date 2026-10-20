@@ -183,24 +183,36 @@ test("windowedTps：窗口内增量 / 净时长，不受历史累积影响", () 
   const samples = [
     { at: 0, tok: 0 },
     { at: 10_000, tok: 1000 },
+    { at: 11_000, tok: 1050 },
     { at: 12_000, tok: 1100 },
   ]
-  const tps = windowedTps(samples, 12_000, 0, 10_000)!
+  const tps = windowedTps(samples, 12_000, 10_000)!
   assert.equal(Math.round(tps), 50) // 100 tok / 2s，而不是 1100/12s
 })
 
-test("windowedTps：窗口内工具执行时长从分母扣除", () => {
+test("windowedTps：无 token 增长的间隔不计入分母（工具/等待）", () => {
+  // 0~1000ms 静默（工具执行），1000~2000ms 产出 50 tok
   const samples = [
-    { at: 10_000, tok: 1000 },
-    { at: 12_000, tok: 1100 },
+    { at: 0, tok: 0 },
+    { at: 1000, tok: 0 },
+    { at: 1500, tok: 25 },
+    { at: 2000, tok: 50 },
   ]
-  // 窗口内工具跑了 1s → 有效生成 1s
-  assert.equal(Math.round(windowedTps(samples, 12_000, 1000, 10_000)!), 100)
+  // 活动时长 1000ms（只有后半段），不是 2000ms
+  assert.equal(Math.round(windowedTps(samples, 2000, 0)!), 50)
+})
+
+test("windowedTps：整窗静默 → undefined（沿用上一值，不衰减）", () => {
+  const samples = [
+    { at: 0, tok: 100 },
+    { at: 2000, tok: 100 },
+  ]
+  assert.equal(windowedTps(samples, 2000, 0), undefined)
 })
 
 test("windowedTps：样本或有效时长不足 → undefined（不猜）", () => {
-  assert.equal(windowedTps([{ at: 0, tok: 0 }], 1000, 0, 0), undefined)
-  assert.equal(windowedTps([{ at: 0, tok: 0 }, { at: 300, tok: 10 }], 300, 0, 0), undefined)
+  assert.equal(windowedTps([{ at: 0, tok: 0 }], 1000, 0), undefined)
+  assert.equal(windowedTps([{ at: 0, tok: 0 }, { at: 300, tok: 10 }], 300, 0), undefined)
 })
 
 test("回归：起始高速后转速恒定，窗口速度会收敛而不是一路下滑", () => {

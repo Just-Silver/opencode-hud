@@ -206,6 +206,8 @@ export function estimateTokens(text: string, profile: keyof typeof ASCII_PER_TOK
 export const LIVE_WINDOW_MS = 2000
 // 窗口内有效生成时长的下限：太短则比值不可信
 export const LIVE_MIN_SPAN_MS = 800
+// 单个「有产出」间隔的上限：一次长停顿后补发的 token 不能被算成整段都在生成
+export const ACTIVE_GAP_CAP_MS = 1250
 
 // 累计估算的一次观测（tok 为该时刻的累计估算值）
 export type SamplePoint = { at: number; tok: number }
@@ -215,13 +217,38 @@ export function toolMsBetween(parts: readonly PerfPart[], lo: number, hi: number
   return mergedIntervalMs(toolIntervals(parts), lo, hi)
 }
 
-// 滑动窗口速度：只用窗口内的增量与净生成时长。
+// [start, now] 内的「活动时长」：只累计 token 有增长的采样间隔。
+// 无 token 产出的时段（等待首字、隐形思考、工具执行、工具返回后重新 prefill）
+// 属于等待，不该出现在速度分母里；单段封顶避免一次停顿后的补发被算成整段生成。
+export function activeMsBetween(
+  samples: readonly SamplePoint[],
+  start: number,
+  now: number,
+): number {
+  if (samples.length < 2) return 0
+  const from = Math.max(start, samples[0].at)
+  const end = Math.min(now, samples[samples.length - 1].at)
+  if (end <= from) return 0
+
+  let total = 0
+  let prevAt = from
+  let prevTok = tokAt(samples, from) ?? samples[0].tok
+  for (const s of samples) {
+    if (s.at <= prevAt) continue
+    if (s.at > end) break
+    if (s.tok > prevTok) total += Math.min(s.at - prevAt, ACTIVE_GAP_CAP_MS)
+    prevAt = s.at
+    prevTok = s.tok
+  }
+  return total
+}
+
+// 滑动窗口速度：只用窗口内的增量与「活动时长」。
 // windowStart 由调用方指定（已钳位到「生成起点 / 最近工具结束」之后），
 // 避免把工具执行期或生成开始前的空档算进分母。
 export function windowedTps(
   samples: readonly SamplePoint[],
   now: number,
-  pausedMs: number,
   windowStart: number,
 ): number | undefined {
   if (samples.length < 2) return undefined
@@ -234,9 +261,8 @@ export function windowedTps(
   if (baseTok === undefined) return undefined
 
   const last = samples[samples.length - 1]
-  const span = last.at - start
-  if (span <= 0) return undefined
-  const active = span - pausedMs
+  if (last.at - start <= 0) return undefined
+  const active = activeMsBetween(samples, start, now)
   if (active < LIVE_MIN_SPAN_MS) return undefined
   const deltaTok = last.tok - baseTok
   if (deltaTok < LIVE_MIN_TOK) return undefined
@@ -290,8 +316,13 @@ export function computeLivePerf(
   // 工具执行中：分子分母同时停摆 → 用调用方缓存的「工具开始前」的值，绝不再重算。
   // 不能用 state.status === "streaming" 判定：那是参数仍在生成（模型还在吐 token），
   // 此时参数已计入分子，速度应继续计算；只有 ran 已写、completed 未写才是真执行。
-  if (runningTool(parts)) {
-    return { phase: "tool", ttftMs: ttftMs ?? opts?.ttftMs, tps: opts?.tps }
+  const tool = runningTool(parts)
+  if (tool) {
+    return {
+      phase: "tool",
+      ttftMs: ttftMs ?? opts?.ttftMs,
+      tps: opts?.tps,
+    }
   }
 
   // 首字前：等待时长仍在累计（此时用 … 表示「还在等」），速度沿用本回合最近值
@@ -309,15 +340,13 @@ export function computeLivePerf(
   if (opts?.samples && opts.samples.length >= 2 && elapsed >= LIVE_WINDOW_MS) {
     const floor = Math.max(firstStart, lastToolEnd(parts) ?? firstStart)
     const windowStart = Math.max(floor, now - LIVE_WINDOW_MS)
-    const pausedInWindow = toolMsBetween(parts, windowStart, now)
-    tps = windowedTps(opts.samples, now, pausedInWindow, windowStart)
+    tps = windowedTps(opts.samples, now, windowStart)
+  } else if (elapsed >= LIVE_MIN_GEN_MS && estTok >= LIVE_MIN_TOK) {
+    tps = (estTok / elapsed) * 1000
   }
-  if (tps === undefined) {
-    tps =
-      elapsed >= LIVE_MIN_GEN_MS && estTok >= LIVE_MIN_TOK ? (estTok / elapsed) * 1000 : opts?.tps
-  }
-
-  return { phase: "streaming", ttftMs, tps }
+  // 窗口/守卫算不出时沿用上一个值：这里绝不能回落「累计平均」，
+  // 否则工具前后、隐形思考等无 token 时段会让读数一路衰减且不回收。
+  return { phase: "streaming", ttftMs, tps: tps ?? opts?.tps }
 }
 
 // ── 子代理 ──
