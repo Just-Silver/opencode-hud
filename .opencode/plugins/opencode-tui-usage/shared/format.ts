@@ -3,8 +3,13 @@ import type { QuotaItem } from "../model/types.ts"
 
 // token 数：123.6k / 200k / 28.4k
 export function fmtTokens(v: number): string {
+  if (!Number.isFinite(v)) return ""
   if (v >= 1_000_000) return trimZero((v / 1_000_000).toFixed(1)) + "M"
-  if (v >= 1000) return trimZero((v / 1000).toFixed(1)) + "k"
+  if (v >= 1000) {
+    const k = trimZero((v / 1000).toFixed(1))
+    // 999,950 起一位小数会进位成 "1000k"，降格显示不如直接进到 M
+    return k === "1000" ? "1M" : k + "k"
+  }
   return String(v)
 }
 

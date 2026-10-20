@@ -35,7 +35,7 @@
 - 19425 双层变化（相对 18707，实测）：
   1. **包名改名**：运行时注入的插件模块由 `@opencode-ai/plugin/tui` 改为 `@opencode/plugin/tui`（**无兼容重映射**，旧名 import 直接 ResolveMessage 失败）；npm 主包同时 `@opencode-ai/cli` → `@opencode/cli`
   2. **目录型插件布局**：发现器只扫 `plugins/`（与 `plugin/`）**直接子项**；直接子 `.ts`/`.js` = 文件插件；直接子目录 = 目录插件，入口经解析器取 `tui.tsx`（TUI）/`index.*`、`server.*`（server）。旧的嵌套 `plugins/tui/opencode-tui-usage.tsx` 形态在 19425 上**既不被服务端也不被 TUI 加载**（探针实测空日志）。直接子 `.tsx` 文件（非目录）也不被发现（文件只认 `.ts`/`.js`，实测）
-- **判据**：`opencode2 plugin list` 列出候选（目录型只看 `tui` 入口存在与否）；真实加载看 `opencode2 api --standalone --print-logs GET /api/plugin` 的 stderr `msg="loading plugin"` + `WARN failed to load plugin ... cause`；TUI 侧看探针文件 `~/.local/share/opencode/log/tui-usage.log`（`$env:TUI_USAGE_PROBE=1`）
+- **判据**：`opencode2 plugin list` 列出候选（目录型只看 `tui` 入口存在与否）；真实加载看 `opencode2 api --standalone --print-logs GET /api/plugin` 的 stderr `msg="loading plugin"` + `WARN failed to load plugin ... cause`；TUI 内效果直接用应用内 console 面板（探针模块已移除，见「运行与验证」）
 - **注意**：`plugin list` 读后台 **service 缓存**，改磁盘后需 `opencode2 service restart`（或等 `plugin update`）才刷新；`api --standalone` 起私有子服务可即时看真值
 - **历史（≤18707，2026-09-01 三层根因，已过时仅供参考）**：18721/18743 曾出现「发现器只认根层 direct `.ts`/`.js` + 依赖外置化（server 端 import `@opencode-ai/plugin` 走磁盘 `~/.config/opencode/node_modules/`，官方从不安装）+ 加载器 `?mtime=` file:// URL bug」；我方实证提交 #46408、#42051 同族
 - **配置安装（`opencode.json(c)` 的 `plugins`）：完整方法学、包形状、验证判据与「TUI 插件双 Solid 陷阱」已整理到 `docs/config-install.md`（面向非 TUI 插件复用；2026-09-24 定论）**。一句话：TUI 插件经配置安装会落进 `node_modules`，npm 自动安装的 peer 依赖（`solid-js`/`@opentui/*`）形成**双 Solid 运行时** → 只画首帧不刷新（现象：侧边栏首次为空、**切一次会话才显示**）→ 本插件回退脚本安装；上游 #48883（关闭为重复）/#33884/#39986（均 OPEN），非 TUI（server）插件不受影响
@@ -47,6 +47,7 @@
 - 功能开关一览：供应商级 `enabled: false` 跳过白名单（新供应商待验期间用）；`TUI_USAGE_PROBE` 已随探针模块移除（v3.1.0）
 - Command Code 已启用（`quota/providers/command-code.ts`：`mapCommandCode` 纯函数 + `fetchCommandCode` 双 API，`enabled: true`）；测试 `tests/command-code.test.ts` 离线覆盖转换逻辑
 - 外部参考项目分析：`docs/reference-opencode-cache-and-tps.md`（同类插件 `doorlockdoor/opencode-cache-and-tps` 的 TTFT/TPS 口径、常驻运行时+命令层、事件节流、v2 适配、credential 查询差异与建议落地顺序）
+- Token 口径与对账：`docs/token-accounting.md`（侧边栏累计用量取 `SessionInfo.tokens`（宿主聚合列），**不可**用 `data.session.message.list()` 求和——宿主分页加载，未滚动历史不在其中；「总量」含缓存读取、会话全生命周期累计、不含子会话；与 `session_v2`/`session_message` 的核对方法）
 - 子代理区块设计：`docs/design-subagent-section.md`（`session.family()` 取数、耗时口径 `time.idle` 的坑、34 列布局、不做持久化）
 - 性能指标设计：`docs/design-performance-footer.md`（首字/速度口径、`prompt.footer.status` 落点与两档宽度、实时估算与事件驱动；**不含延迟**）
 - 凭据解析统一在 `quota/key.ts`：`resolveProviderKey(pid)` 顺序 keyCache → 项目配置（近→远，同目录 `.opencode/` 优先）→ 全局配置（XDG_CONFIG_HOME 优先）→ DB credential 表兜底；支持 V2 `providers.{id}.settings.apiKey` / V1 `provider.{id}.options.apiKey` 与 `{env:VAR}` 占位符，模块零日志（脱敏：key 不落盘、不上报）

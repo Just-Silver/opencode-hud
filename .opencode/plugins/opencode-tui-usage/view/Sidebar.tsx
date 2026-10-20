@@ -11,7 +11,9 @@ import {
   contextUsageOf,
   resolveContextLimit,
   resolveProviderID,
+  usageFromTokens,
 } from "../model/usage.ts"
+import type { TokenLike } from "../model/types.ts"
 import { getQuotaStore, QUOTA_REFRESH_MS, type QuotaDeps } from "../model/quota.ts"
 import { buildRow, sortRows, SPINNER_INTERVAL_MS, type SubagentRow } from "../model/subagent.ts"
 import { SubagentSection } from "./SubagentSection.tsx"
@@ -40,7 +42,9 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
   // ── 数据源 getter（在 memo 内调用即订阅） ──
   const messages = () => (sessionID ? (ctx.data.session.message.list(sessionID) ?? []) : [])
   const session = () =>
-    sessionID ? ((ctx.data.session.get(sessionID) as { location?: string } | undefined) ?? undefined) : undefined
+    sessionID
+      ? ((ctx.data.session.get(sessionID) as { location?: string; tokens?: TokenLike } | undefined) ?? undefined)
+      : undefined
   const models = () =>
     session()?.location ? (ctx.data.location.model.list(session()!.location) ?? []) : []
 
@@ -56,8 +60,11 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
     },
   })
 
-  // ── 会话用量（Model 纯函数 → memo） ──
-  const usage = createMemo(() => (sessionID ? aggregateUsage(messages()) : undefined))
+  // ── 会话用量（宿主聚合列为准，缺失时退回已加载消息窗口） ──
+  const usage = createMemo(() => {
+    if (!sessionID) return
+    return usageFromTokens(session()?.tokens) ?? aggregateUsage(messages())
+  })
   const cacheRate = createMemo(() => calcCacheRate(usage()))
   const ctxUsage = createMemo(() => (sessionID ? contextUsageOf(messages()) : undefined))
   const limit = createMemo(() => {

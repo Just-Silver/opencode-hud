@@ -8,8 +8,27 @@ import {
   contextUsageOf,
   resolveContextLimit,
   resolveProviderID,
+  usageFromTokens,
 } from "../.opencode/plugins/opencode-tui-usage/model/usage.ts"
 import type { MessageLike } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
+
+// ─── usageFromTokens ───
+test("usageFromTokens：直接采用会话聚合列（含缓存读）", () => {
+  assert.deepEqual(usageFromTokens({ input: 100, output: 50, reasoning: 20, cache: { read: 30, write: 10 } }), {
+    input: 100,
+    output: 50,
+    reasoning: 20,
+    read: 30,
+    write: 10,
+    total: 210,
+  })
+})
+
+test("usageFromTokens：字段缺失按 0；无 tokens 或全 0 → undefined", () => {
+  assert.deepEqual(usageFromTokens({ output: 7 }), { input: 0, output: 7, reasoning: 0, read: 0, write: 0, total: 7 })
+  assert.equal(usageFromTokens(undefined), undefined)
+  assert.equal(usageFromTokens({ input: 0, output: 0, cache: { read: 0 } }), undefined)
+})
 
 // ─── aggregateUsage ───
 test("aggregateUsage：多条消息 token 累加", () => {

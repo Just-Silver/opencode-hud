@@ -3,7 +3,7 @@
 //   Windows：%LOCALAPPDATA%（C:\Users\<user>\AppData\Local）
 //   macOS  ：~/Library/Application Support
 //   Linux  ：$XDG_DATA_HOME 或 ~/.local/share
-// 插件所有持久文件（探针日志、更新检查缓存）都放这里，不与 opencode 自身的数据目录混放。
+// 插件所有持久文件（更新检查缓存等）都放这里，不与 opencode 自身的数据目录混放。
 import { homedir } from "os"
 import { join } from "path"
 

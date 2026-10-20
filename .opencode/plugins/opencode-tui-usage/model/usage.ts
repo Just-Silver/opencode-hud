@@ -1,7 +1,26 @@
 // ─── 模型层：用量聚合与解析纯函数（无 solid/UI 依赖，可单测） ───
-import type { MessageLike, UsageData } from "./types.ts"
+import type { MessageLike, TokenLike, UsageData } from "./types.ts"
 
-// 会话全部消息的 token 累加聚合；无任何 token 时返回 undefined
+function usageOf(input: number, output: number, reasoning: number, read: number, write: number): UsageData | undefined {
+  const total = input + output + reasoning + read + write
+  if (total <= 0) return
+  return { input, output, reasoning, read, write, total }
+}
+
+// 会话累计用量：直接取 SessionInfo.tokens（宿主 session_v2 聚合列，覆盖整个会话）。
+// 不能用消息求和：宿主按页加载消息，未滚动的历史不在 list() 里，长会话会少算一到两个数量级。
+export function usageFromTokens(tokens: TokenLike | undefined): UsageData | undefined {
+  if (!tokens) return
+  return usageOf(
+    tokens.input ?? 0,
+    tokens.output ?? 0,
+    tokens.reasoning ?? 0,
+    tokens.cache?.read ?? 0,
+    tokens.cache?.write ?? 0,
+  )
+}
+
+// 已加载消息窗口的 token 累加（仅作 SessionInfo 缺失时的兜底）；无任何 token 时返回 undefined
 export function aggregateUsage(messages: MessageLike[]): UsageData | undefined {
   let input = 0
   let output = 0
@@ -17,9 +36,7 @@ export function aggregateUsage(messages: MessageLike[]): UsageData | undefined {
     read += t.cache?.read ?? 0
     write += t.cache?.write ?? 0
   }
-  const total = input + output + reasoning + read + write
-  if (total <= 0) return
-  return { input, output, reasoning, read, write, total }
+  return usageOf(input, output, reasoning, read, write)
 }
 
 // 缓存率：cc-switch 口径 = read / (input + write + read)，一位小数
@@ -38,7 +55,7 @@ export function calcCacheRate(usage: UsageData | undefined): number | undefined 
 // 上下文的实际占用：取最新一条 assistant 消息的 tokens 求和
 // （对齐内置 Context 显示口径，缓存读取是当前请求的上下文复用，不是累计）
 export function contextUsageOf(messages: MessageLike[]): number | undefined {
-  const last = [...messages].reverse().find((m) => m.tokens)
+  const last = messages.findLast((m) => m.tokens)
   if (!last?.tokens) return
   const t = last.tokens
   return (
@@ -55,7 +72,7 @@ export function resolveContextLimit(
   messages: MessageLike[],
   models: Array<{ id: string; limit?: { context?: number } }>,
 ): number | undefined {
-  const last = [...messages].reverse().find((m) => m.model?.id)
+  const last = messages.findLast((m) => m.model?.id)
   if (!last) return
   return models.find((m) => m.id === last.model!.id)?.limit?.context
 }
@@ -72,14 +89,12 @@ export function resolveProviderID(
   messages: MessageLike[],
   lookupModel: (id: string) => { providerID?: string } | undefined,
 ): string | undefined {
-  const last = [...messages]
-    .reverse()
-    .find(
-      (m) =>
-        (typeof m?.providerID === "string" && m.providerID.length > 0) ||
-        (typeof m?.model?.providerID === "string" && m.model.providerID.length > 0) ||
-        (typeof m?.model?.id === "string" && m.model.id.length > 0),
-    )
+  const last = messages.findLast(
+    (m) =>
+      (typeof m?.providerID === "string" && m.providerID.length > 0) ||
+      (typeof m?.model?.providerID === "string" && m.model.providerID.length > 0) ||
+      (typeof m?.model?.id === "string" && m.model.id.length > 0),
+  )
   if (!last) return undefined
   if (typeof last.providerID === "string" && last.providerID.length > 0) return last.providerID
   if (typeof last.model?.providerID === "string" && last.model.providerID.length > 0) return last.model.providerID

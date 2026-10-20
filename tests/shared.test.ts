@@ -36,6 +36,9 @@ test("fmtTokens：千分/百万缩写", () => {
   assert.equal(fmtTokens(123600), "123.6k")
   assert.equal(fmtTokens(200000), "200k")
   assert.equal(fmtTokens(2840000), "2.8M")
+  assert.equal(fmtTokens(999949), "999.9k")
+  assert.equal(fmtTokens(999999), "1M")
+  assert.equal(fmtTokens(Number.NaN), "")
   assert.equal(trimZero("200.0"), "200")
 })
 
