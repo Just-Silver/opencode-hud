@@ -5,45 +5,29 @@
 
 ## [4.0.0] - 2026-10-21
 
-### 破坏性变更
 
-- **移除全部实时 token 功能**（`live/`、`model/calibration.ts`、`model/prior.ts`、`model/rate.ts`、`shared/throttle.ts` 删除）：底部状态行的首字与速度**只在每个 assistant 步结束时刷新**，生成过程中沿用上一步的值。不再有实时估算、滑动窗口、卡尔曼速率、在线学习系数、事件订阅与心跳定时器。
+### 文档
 
-### 修复
-
-- **实时读数不稳定**：估算分子依赖字符→token 折算、分母依赖 delta 到达节奏，两者都带有无法从数据推出的参数；在线学习与速率滤波为压住误差引入的机制反而比固定口径更不稳（真机 MAPE 5.6% vs 6.0%，差异在噪声内）。改为只用宿主写回的精确 `tokens`。
-- **性能块不再读数据库、不订阅任何事件**：数据源只有 `session.message.list()` 的内存投影，宿主在 `session.step.ended` 时写回 `tokens`/`time.completed`，memo 随之重算——一个回合里有几个步就刷新几次。
-
-### 杂项
-
-- 删除 `computeLivePerf` / `estimateParts` / `stepFeatures` / `estimateTokens` / `windowedTps` / `toolMsBetween` / `runningTool` / `lastToolEnd` 及 `LIVE_*` 常量。
-- **`model/types.ts` 的 `PerfMessage` / `PerfPart` 只保留实际读取的字段**：移除 `time.streamed`（实时链路与体感 TPS 专用）、`id`（原用于学习去重）、`model`（原用于按 provider/model 分桶）、`PerfPart.text`（原用于字符估算）、`PerfPart.state`（原用于判定工具执行态，属于冻结逻辑）。
-- `model/subagent.ts` 删除 `summaryText`（旧版标题后缀摘要，已被 `statusLights` + `totalTokensText` 取代，零引用）。
-- 删除 4 个测试文件（live-recorder / calibration / rate / throttle），`tests/perf.test.ts` 移除实时用例；共 127 条。
-- `tests/key.test.ts` 的「全局配置兜底」用例改用 `mkdtempSync` 临时目录作 cwd，并加隔离自检：原实现指向不存在的 `tests/fixtures/empty`（git 不跟踪空目录），且 `configCandidates` 会向上遍历祖先目录，祖先一旦有配置就会悄悄改掉被测语义。
-- `docs/reference-realtime-tps.md` 归档为历史调研；`docs/design-performance-footer.md` §3 改写为「更新时机：每步结束」，§7 标注为历史记录。
-
-## [3.2.0] - 2026-10-21
+- 补回 v3.2.0 的详细变更记录（git-cliff 覆盖了手写内容）
 
 ### 新功能
 
-- **实时速度改用事件驱动卡尔曼**（`model/rate.ts`）：状态为 `[累计 token, 速率]`，`Q=0` + 在可观测事件（工具调用、步结束、内容段开始）处把协方差重置为冷启动先验。相比原滑动窗口，稳态误差 4.5% → 0.5%、工具返回后恢复 1600ms → 350ms。新息 EMA 作为漏检事件的安全网（实测滞后 0.75s）。
-- **token 估算系数改为在线学习**（`model/calibration.ts` + `model/prior.ts`）：真实 token 每步反哺，按 `providerID/modelID` 分桶、纯内存。先验为「点估计 + 完整协方差矩阵」的成对信息（字母/标点相关 **−0.90**，不可对角化），可用真实数据小幅修正。端到端估算误差中位 16.8% → 4.7%，真机 284 步 6.0% → 5.6%。
-- **后验偏离哨兵**：`sentinel().maxDriftInSe` 暴露各系数相对先验的偏离（单位：先验标准误），超过膨胀上限即视为部署漂移，便于诊断供应商静默换分词器。
-
-### 修复
-
-- **实时速度随 delta 批次节奏虚高**：分母从「观测到增长的采样间隔之和」改为墙钟窗口跨度。实测本机 delta 间隔中位 187ms，旧口径在该节奏下偏高约四成，粗批次时可翻倍甚至冻结。
-- **估算 token 严重偏低**：删除固定的 4.0 / 2.9 / 3.7 字符画像（三个数中两个从未被真实数据验证过），改为逐类字符计数 × 实测系数。
-- **`汉字` 与 `全角` 特征共线**（相关系数 0.98）：合并为 `CJK` 一项，系数估计稳定性从 ±1.3 提升到 ±0.08。
-- **安全网检测当帧采用错值**：速率突变被检出时，该帧不再输出按旧模型算出的读数。
+- 移除实时 token 功能，改为每步结束刷新（v4.0.0）（破坏性变更）
 
 ### 杂项
 
-- 新增 `model/prior.ts`（先验系数 + 协方差，需成对维护）、`model/rate.ts`、`model/calibration.ts` 及对应测试（+36 条，共 190 条）。
-- 删除 `activeMsBetween`、`ACTIVE_GAP_CAP_MS`、`ASCII_PER_TOKEN` 画像表。
-- `docs/design-performance-footer.md` §7 完整记录测量数据、失败尝试（公式推 Q 不成立）与被推翻的判断。
+- 更新 CHANGELOG 到 v3.2.0
+## [3.2.0] - 2026-10-21
 
+
+### 新功能
+
+- 实时速度改用事件驱动卡尔曼，token 估算改为可学习校准（v3.2.0）
+
+### 杂项
+
+- 更新 CHANGELOG 到 v3.1.2
+- 更新 CHANGELOG 与文档到 v3.2.0
 ## [3.1.2] - 2026-10-20
 
 
