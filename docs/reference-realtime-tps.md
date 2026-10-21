@@ -2,6 +2,8 @@
 
 <!-- 职责：对照 GitHub 上高星 OpenCode TPS 插件（v1/v2）的实时速度、防抖与首 Token 口径，提炼可借鉴做法；不写：本项目自身实现细节（见 docs/design-performance-footer.md）、额度与安装 -->
 
+> **历史文档（2026-10-21 归档）**：本项目**已不再实现实时速度**（v4.0.0 移除全部实时链路，只显示每个 assistant 步结束后的精确值，见 `docs/design-performance-footer.md` §3）。本文保留作为「实时口径为什么不可靠」的调研证据，不再代表当前设计。
+
 - 调研时间：2026-10-20
 - 方法：按 star 排序抓取候选仓库后 `git clone --depth 1` 直接读源码（非 README 推断）
 - 结论一句话：**没有人用「从首 token 起的累计时间」当实时分母**；高星实现要么按「每个 chunk 的生成区间」计权（ChiR24），要么用短窗口 + 空档裁切，并且在无 token 到达时**隐藏或冻结**读数，而不是让它自然衰减。
@@ -112,6 +114,8 @@ rateAt(now):
 | will / floz | — | — | 不显示 TTFT |
 | 本插件 | 消息 `time.created`（每步） | 首个 content part / 于运行期用 `session.*.started` 事件补齐 | 最近一条有效步，不回退平均 |
 
+- **本项目现状（v4.0.0）**：只算「最近一条已完成步的精确值」，无实时读数、无窗口、无平滑、无事件订阅——每个 assistant 步结束刷新一次。下表的「本插件」列是**历史实现**（已删除），保留用于对照。
+
 共识与差异：
 
 - **首 token 包含工具参数**：chi 与 tarq 都把 `tool.input` 的第一个 delta/started 当作首 token（DeepSeek Harness 也一样，`argumentsDelta` 非空算首 token）。
@@ -182,7 +186,7 @@ TPS ≈ 1 / mean_time_per_output_token = (N − 1) / (last_token_ts − first_to
 1. **分母不是从首 token 起算的墙钟**，而是「有 token 的 chunk 区间之和」（chi）或「短窗口 + 空档裁切」（floz）。改造前本插件用 `now − firstStart − 工具区间`，只要出现“没有可观测 token 的时段”（思考内容不返回、工具参数未开始、工具刚结束），分母就白涨。
 2. **无 token 到达时的显示策略是“隐藏/冻结/换均值”**，不是“回落累计平均”。改造前 `windowedTps` 失败后回退 `estTok / elapsed` 的累计分支，正是“掉下去且不回收”的直接来源。
 
-可借用、按收益排序（1~3 已于 2026-10-20 落地，见 `docs/design-performance-footer.md` §3）：
+可借用、按收益排序（**1~3 曾于 2026-10-20 落地，2026-10-21 随实时链路一并移除**；最终只保留「步结束用精确值」，见 `docs/design-performance-footer.md` §3）：
 
 1. **实时分母改成活动时长**：采样点之间 `tok` 不变的间隔不计入（单段封顶 1250ms）。等价于 floz 的 `ACTIVE_GAP_MS`，但以“有无新增 token”为判据，比固定裁切更适合隐形思考。
 2. **窗口失效时保持冻结值**，不要回落累计平均；工具结束后的窗口重建期沿用工具前冻结值。

@@ -22,14 +22,14 @@
 
 可复用要点（均为纯函数、可离线单测）：
 
-- **精确采样**（`computePerfSample`）：`TTFT = 首个内容 part.time.start − time.created`；`TPS = (output+reasoning) / 净生成时长`；净生成时长 = `completed − firstStart − 工具执行区间并集`（并行重叠去重 + 钳位）。完成/无错误/非压缩/有产出才是样本。
-- **实时估算**（`computeLivePerf`）：流式期间用 `estimateTokens(文本)` 估分子、`now − firstStart` 估分母；**工具相位冻结**（分子分母同时停摆），工具返回后严格连续；守卫（窗口 < 500ms 或 < 8 tok）回落到「本回合最近实时值」而不是闪断或回落精确值。
+- **精确采样**（`computePerfSample`）：`TTFT = 首个内容 part.time.start − time.created`；`TPS = (output+reasoning) / 净生成时长`；净生成时长 = `completed − firstStart − 工具执行区间并集`（并行重叠去重 + 钳位）。完成/无错误/非压缩/有产出才是样本。**本项目已采用，且是唯一的性能口径（v4.0.0）**。
+- ~~**实时估算**（`computeLivePerf`）~~：**本项目已明确不采用**（2026-10-21 移除全部实时链路：数字不稳、估算依赖无法从数据推出的参数）。保留记录：对方用 `estimateTokens(文本)` 估分子、`now − firstStart` 估分母，工具相位冻结。
 - **守卫与例外**：`MIN_GEN_MS=300`、`BUFFER_MS_PER_TOKEN=1.0`、整包参数守卫（缓冲 router 把工具参数整块吐出来 → 分子虚高，三阈值联动剔除），每条阈值都写了真实负载误杀率锚点。
 - **模型过滤**：会话跨模型时中位数失真 → 按消息 `providerID/modelID` 指纹过滤；回合口径取「该回合最后一条带指纹的步骤」整体计入/排除。
 - **体感 TPS**（对齐宿主 footer）：只用消息级 `time.streamed`（v2 专属且持久化），`Σtokens / Σ(streamed−created)`；无该字段（V1/旧会话）自动回落输出速度。
 - **token 估算画像**：`thinking 4.0 / answer 2.9 / code 3.7` ASCII 字/token，汉字 1.5 字/token，假名/全角 1 字/token，附 `benchmarks/tokenize-calibrate.mts` 在真库上标定。
 
-落地建议：先做「会话级精确 TTFT/TPS 中位数 + 最近值」，无需流式估算即可拿到主要价值；实时块（`live.ts`）作为第二阶段，注意 `PART_THROTTLE_MS=100` 的 10Hz 节流。
+落地建议：**只做「最近一条有效步」**（本项目最终选择，v4.0.0 已实现）。实时块（`live.ts`）作为第二阶段：**本项目实测后放弃**，理由见 `docs/design-performance-footer.md` §3。
 
 **我们已经能拿到的（2.0.32 实测类型）**：`SessionMessageAssistant` 顶层就有 `tokens: TokenUsageInfo {input, output, reasoning, cache:{read,write}}`、`cost`、`model: ModelRef`、`time:{created, streamed?, completed?}`、`content[]`、`error`、`finish`，还有 `session.usage.updated` / `session.usage.recorded` 事件。也就是说 TPS 分母（`streamed − created`）与分子（`output+reasoning`）都在，**缺的只是首字时刻**（见第 3 节的事件约束）。
 
@@ -56,7 +56,7 @@
 
 ## 3. 事件驱动 + 节流（涉及我们可能存在的刷新盲区）
 
-- `util.ts` 的 `createThrottledBumper`：**前沿 + 尾沿**节流（首个事件立即触发，间隔满后至多补一次），避免纯尾沿去抖在连续流下被饿死；`dispose` 清理挂起定时器。10 行纯函数、可单测。
+- `util.ts` 的 `createThrottledBumper`：**前沿 + 尾沿**节流（首个事件立即触发，间隔满后至多补一次），避免纯尾沿去抖在连续流下被饿死；`dispose` 清理挂起定时器。10 行纯函数、可单测。**本项目未采用**（v4.0.0 无高频刷新需求，`shared/throttle.ts` 已删除）。
 - 双通道：`partVersion`（`message.part.updated`/`message.updated`，100ms 节流）承载高频增量；`refreshTick`（仅 `session.updated`）承载会话级聚合变化。
 - `createBusyTick`：**只在 busy 时**建 250ms 心跳，空闲零 interval；`status` 不可用时回退「最后一条 assistant 未完成」。
 

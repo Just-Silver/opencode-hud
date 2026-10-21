@@ -3,6 +3,26 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.0.0] - 2026-10-21
+
+### 破坏性变更
+
+- **移除全部实时 token 功能**（`live/`、`model/calibration.ts`、`model/prior.ts`、`model/rate.ts`、`shared/throttle.ts` 删除）：底部状态行的首字与速度**只在每个 assistant 步结束时刷新**，生成过程中沿用上一步的值。不再有实时估算、滑动窗口、卡尔曼速率、在线学习系数、事件订阅与心跳定时器。
+
+### 修复
+
+- **实时读数不稳定**：估算分子依赖字符→token 折算、分母依赖 delta 到达节奏，两者都带有无法从数据推出的参数；在线学习与速率滤波为压住误差引入的机制反而比固定口径更不稳（真机 MAPE 5.6% vs 6.0%，差异在噪声内）。改为只用宿主写回的精确 `tokens`。
+- **性能块不再读数据库、不订阅任何事件**：数据源只有 `session.message.list()` 的内存投影，宿主在 `session.step.ended` 时写回 `tokens`/`time.completed`，memo 随之重算——一个回合里有几个步就刷新几次。
+
+### 杂项
+
+- 删除 `computeLivePerf` / `estimateParts` / `stepFeatures` / `estimateTokens` / `windowedTps` / `toolMsBetween` / `runningTool` / `lastToolEnd` 及 `LIVE_*` 常量。
+- **`model/types.ts` 的 `PerfMessage` / `PerfPart` 只保留实际读取的字段**：移除 `time.streamed`（实时链路与体感 TPS 专用）、`id`（原用于学习去重）、`model`（原用于按 provider/model 分桶）、`PerfPart.text`（原用于字符估算）、`PerfPart.state`（原用于判定工具执行态，属于冻结逻辑）。
+- `model/subagent.ts` 删除 `summaryText`（旧版标题后缀摘要，已被 `statusLights` + `totalTokensText` 取代，零引用）。
+- 删除 4 个测试文件（live-recorder / calibration / rate / throttle），`tests/perf.test.ts` 移除实时用例；共 127 条。
+- `tests/key.test.ts` 的「全局配置兜底」用例改用 `mkdtempSync` 临时目录作 cwd，并加隔离自检：原实现指向不存在的 `tests/fixtures/empty`（git 不跟踪空目录），且 `configCandidates` 会向上遍历祖先目录，祖先一旦有配置就会悄悄改掉被测语义。
+- `docs/reference-realtime-tps.md` 归档为历史调研；`docs/design-performance-footer.md` §3 改写为「更新时机：每步结束」，§7 标注为历史记录。
+
 ## [3.2.0] - 2026-10-21
 
 ### 新功能

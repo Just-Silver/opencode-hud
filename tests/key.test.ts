@@ -7,6 +7,8 @@
 //   global/opencode/opencode.json  全局配置（通过 XDG_CONFIG_HOME 指向，{env:} 占位符）
 import { test } from "node:test"
 import assert from "node:assert/strict"
+import { mkdtempSync, rmSync } from "node:fs"
+import { tmpdir } from "node:os"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import {
@@ -77,9 +79,18 @@ test("空 pid → undefined", () => {
 
 // ─── 全局配置兜底（XDG_CONFIG_HOME） ───
 test("仅全局配置存在时兜底命中（cwd 无任何配置）", () => {
-  process.env.GROQ_API_KEY = "gsk-global-5678"
-  setGlobalConfigDir()
-  assert.equal(resolveApiKeyFromConfig("groq", { cwd: join(fixtures, "empty") }), "gsk-global-5678")
+  // cwd 用临时目录：configCandidates 会从 cwd 逐级向上找配置，fixture 目录的祖先里
+  // 一旦出现 opencode.json 就会抢先命中，测试会变成在验证别的东西。
+  const isolated = mkdtempSync(join(tmpdir(), "oc-key-isolated-"))
+  try {
+    process.env.GROQ_API_KEY = "gsk-global-5678"
+    setGlobalConfigDir()
+    // 前置自检：该 cwd 的祖先链必须查不到任何配置，否则下面的断言失去意义
+    assert.equal(resolveApiKeyFromConfig("__isolation_probe__", { cwd: isolated }), undefined)
+    assert.equal(resolveApiKeyFromConfig("groq", { cwd: isolated }), "gsk-global-5678")
+  } finally {
+    rmSync(isolated, { recursive: true, force: true })
+  }
 })
 
 // ─── resolveProviderKey：keyCache → 配置 → DB（node 下 DB 不可用静默跳过） ───

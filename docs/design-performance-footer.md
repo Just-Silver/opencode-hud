@@ -2,7 +2,7 @@
 
 <!-- 职责：定义 TTFT / token 速度两指标的口径、取数来源与底部状态栏布局；不写：子代理区块（见 docs/design-subagent-section.md）、额度查询、安装更新 -->
 
-- 状态：**已实现**（2026-10-19，v2.4.0）
+- 状态：**已实现**（2026-10-19，v2.4.0）；**2026-10-21 v4.0.0 移除实时链路，改为每步精确值**
 - 落点：`prompt.footer.status`（输入框下方状态行，目录路径与 `295.0K (28%)` 之间）
 - 前提：只支持 opencode2；不做命令、不做 `ui.panel`、**不显示延迟**
 
@@ -55,84 +55,36 @@ tps       = (tokens.output + tokens.reasoning) / genMs × 1000
 
 **不做延迟**：`completed − created − 工具区间` 与「首字 + 速度」高度相关，信息增量小；用户明确只要首字与速度。
 
-## 3. 实时值（流式期间）
+## 3. 更新时机：每步结束（无实时值）
 
-### 为什么不采用滚动窗口
+**v4.0.0 起移除全部实时链路**。此前有过两代实现（2s 滑窗 + 活动时长、事件驱动卡尔曼速率 + 在线学习 token 系数），都被删除：
 
-同类实现分五派（2026-10-19 核对源码）：
+- **现象**：生成过程中数字持续跳动，且估算分子（字符 → token）与在线学习的系数都不稳定，同一个模型在不同流量构成下读数会漂。用户判断「动态学习预测太不稳定」，明确要求去掉。
+- **结论**：性能块只显示**精确值**——宿主在步结束时写回的 `tokens` 算出来的那个数。
 
-| 实现 | 算法 | 参数 |
-| --- | --- | --- |
-| 宿主 `turnTokensPerSecond` | `Σ(output+reasoning) / Σ(streamed − created)`，按回合聚合 | 含 TTFT、不含工具；要求每步都有 `streamed` |
-| **DeepSeek Harness** | `Σ outputTokens / Σ(completed − firstToken)`，**仅步骤结束**，无实时值 | 缺采样整条丢弃；不扣工具（架构保证） |
-| `doorlockdoor/opencode-cache-and-tps` | `estTok / (now − firstStart − 工具区间)`，**累计口径** | 守卫 500ms / 8 tok；工具相位冻结 |
-| `ChiR24/opencode-tps-meter` | **每块按其生成区间计价** + 1s 滚动窗口 | `MIN_RATE_SPAN_MS=50`、`STALL_REPUBLISH_MS=250` |
-| `williamcr01/opencode-tps` | 5s 样本窗口，跳过静默 gap | stale 1.5s 返回 -1 |
-| `floze-the-genius/opencode-tps-meter` | 15s 窗口，gap 截断 | 打补丁进宿主本体 |
-
-**ChiR24 的两条实测结论值得记录**：
-
-1. v2 的 delta 按 **~100ms 批次**下发，不是逐 token——拿单块 token 数除以更短的时间会算出 10000 tok/s 这类离谱值。
-2. **首块（含 prefill）只计入分子、不计入分母**，否则单块样本会把速度压得极低。
-
-我们的累计口径天然不受第 1 点影响（分子分母都从 `firstStart` 累计），且第 2 点正好是对的：`firstStart` 取首个内容到达时刻，prefill 本就在分母之外。
-
-### DeepSeek Harness 的做法（重要对照）
-
-`packages/session/session-stats/src/projection.ts` + `packages/client/ui-chat/src/client/contract/turn-metrics.ts`：
-
-```ts
-tps      = decodeTokens / (decodeMs / 1000)
-ttftMs   = firstTokenTime − stepStartTime
-decodeMs = completedTime − firstTokenTime
-decodeTokens = usage.outputTokens        // 供应商精确值
-```
-
-四个要点：
-
-1. **首 token 定义更宽**：`isTokenDelta` 把非空 `text-delta` / `reasoning-delta` / `tool-call-delta`（`argumentsDelta` 非空或 `name` 存在）都算作首 token。
-2. **先聚合再相除**：`Σtokens / Σms`，每步按时长加权。
-3. **缺采样整条丢弃**：任一步缺 `firstTokenTime` 或 `usage` 就退出分子分母，明确「以省略的方式退化，而不是渲染成零」。
-4. **没有实时值**：`StatsPills` 注释写明 `Settled-node identity prevents stream-delta updates from rerendering the pills`——只在步骤结束更新。
-
-**不能照抄的一点**：dsh 的 `decodeMs = completedTime − firstTokenTime` 天然不含工具时间，因为它的**工具在步与步之间**（`assistant/message` 在 LLM 流结束时组装，之后才跑工具）；而 opencode v2 的一条 assistant 消息把 text/reasoning 与 tool part 放在同一个 content 数组里，工具在**步内部**——所以我们必须扣工具区间并集。
-
-**他们自己承认的局限**（归档笔记原文）：读数来自实测墙钟，**不可复现**——同一回放场景连续两次跑出 69 与 70 tok/s，一段 3ms 的回放流会读成 26333 tok/s。这正是实时侧需要 500ms / 8 tok 守卫的原因。
-
-**选 2s 滑动窗口而非累计平均**：累计口径在起始高速后会单调衰减（实测 225 → 70.6 且永不恢复），这是分子增长慢于分母增长的必然结果，不是模型变慢。窗口取 2s（`LIVE_WINDOW_MS`）、要求净生成 ≥ 800ms（`LIVE_MIN_SPAN_MS`），既能让读数跟上真实转速，也不会因单批 delta 抖动。工具相位仍冻结（工具时间已从分母扣除）。
-
-**跨步取值**：我们显示的是"当前这一步"，取最近有效样本；dsh 显示轮次/会话汇总，所以用加权平均。两者口径不同，不混用。
-
-### 口径差异（不是 bug）
-
-- 宿主：`Σtok / Σ(streamed − created)` = 体感速度（**含** TTFT）
-- 我们：`tok / (completed − firstStart − tools)` = 输出速度（**不含** TTFT）
-
-因此我们的数会略高于宿主 footer，属正常。
-
-### 事件通道
-
-| 用途 | 事件 | 处理 |
-| --- | --- | --- |
-| 首字时刻 | `session.text.started` / `session.reasoning.started` / `session.tool.input.started` | 记 `Map<assistantMessageID, event.created>`（最多 1024 条，超限丢最旧） |
-| 触发重算 | `session.text.delta` / `session.reasoning.delta` / `session.tool.input.delta` | 前沿+尾沿节流 100ms → bump 版本信号 |
-| 相位 | `session.tool.called` / `success` / `failed`、`session.step.ended` | 立即 bump（相位切换不能等节流） |
-| 心跳 | — | **仅当 `status(sid) === "running"`** 时开 250ms interval，空闲立即清（用于捕捉停顿：无 delta 时速度应下降） |
-
-实时估算：
+### 数据来源（纯内存）
 
 ```
-estTok   = Σ estimateTokens(文本, 画像)      // 文本来自 part 内容；画像见下
-activeMs = Σ「token 有增长的采样间隔」（单段 ≤ 1250ms）
-tps      = estTok 的窗口内增量 / activeMs × 1000
+ctx.data.session.message.list(sessionID)   // 宿主 @opencode/client 的内存投影
+        ↓ 每条 assistant 消息（= 一步）
+computePerfSample(message)                 // §2 的精确口径
+        ↓
+latestPerf(messages)                       // 从最后一条向前回溯，取最近有效步
 ```
 
-- 分母是**活动时长**，不是「从首字起的墙钟」：无 token 产出的时段（等待首字、思考内容不返回、工具执行、工具返回后重新 prefill）不计入。否则这些时段只会让读数一路衰减且不回收。
-- 画像（ASCII 字/token）：思考流 `4.0`、答案文本 `2.9`、工具/代码 `3.7`；汉字 `1.5` 字/token；假名/全角 `1` 字/token。
-- 守卫：活动时长 < 800ms 或窗口内增量 < 8 tok → 速度沿用**本回合最近实时值**（没有则留空），**不回落累计平均**、不闪现。
-- 工具相位（`state.status === "running"`，或 `time.ran` 已写且 `time.completed` 未写）：速度**冻结**在工具开始前的值（分子分母同时停摆），UI **只显示 spinner，不显示任何文字/数字**（冻结值没有信息量，还会被误读成模型变慢）；工具结束时若该步已 `completed`，交回精确值。参数仍在生成的 `streaming` 态不冻结（模型还在吐 token）。
-- 首字前（prefill）：显示累计等待时长 `0.42s…`（唯一会增长的计时），速度沿用本回合最近值（无则留空）。
-- 滑动窗口起点钳位到「最近一次工具结束时刻」之后：否则工具返回后的第一个窗口会把整段工具执行期算进分母，速度骤降。
+- **不读数据库**。全仓唯一读 `opencode.db` 的地方是 `quota/key.ts` 的凭据兜底（`credential` 表），与性能无关。
+- **不订阅事件、不设定时器、不做节流**。宿主在处理 `session.step.ended` 时把 `time.completed` 与 `tokens` 写进它自己的内存 store（`@opencode/client` 的 `message.editAssistant`），我们的 memo 依赖 `message.list()`，因此**每个 assistant 步结束都会自动重算并刷新一次**——一个回合里有几个步就刷新几次，不等整回合结束。
+- 生成过程中：**保持上一步的值不动**（不估算、不插值、不闪空）。步结束后由新值替换。
+
+### 为什么不做实时值（历史记录）
+
+同类实现的算法分布在 `docs/reference-realtime-tps.md`（已归档为历史调研）。共同事实：v2 的 delta 按 ~100ms 批量下发，客户端拿不到逐 token 的时间戳，所以任何「实时速度」都必须是估算——
+
+- 分子只能靠字符数 → token 折算（误差 5%~17%，且随内容类型变化）；
+- 分母要处理隐形思考、工具执行、批量投递造成的空档，无论选累计、滑窗还是卡尔曼，都要引入若干无法从数据推出的参数；
+- delta 节奏本身会污染分母（粗批次下曾实测偏高 40%~100%）。
+
+在本机上，为把这些误差压到可接受范围所做的在线学习与速率滤波，反而比固定口径更不稳（真机 MAPE 5.6% vs 6.0%，差异在噪声内）。既然精确值在步结束时一定拿得到，实时读数就是「用不确定性换几秒的时效」，收益不成立。
 
 ## 4. 布局与宽度预算
 
@@ -176,21 +128,19 @@ row (width 100%, justifyContent: space-between, gap 2)
 
 **宽度来源**：`useTerminalDimensions()`（`@opentui/solid`，宿主同款，随 resize 响应式）；退路 `context.renderer.terminalWidth` + 自建 resize 监听。
 
-### 四相位
+### 单一形态（无相位）
 
-同一位置、同一顺序，仅值与后缀变化：
+性能块只有一种形态，不存在 prefill / streaming / tool 相位：
 
-| 相位 | 显示 |
+| 场景 | 显示 |
 | --- | --- |
-| `prefill`（等首字） | `0.42s…` / `0.42s… · 48.2 tok/s` |
-| `streaming` | `0.42s · 48.2 tok/s` |
-| `tool`（工具运行中） | `0.42s · 48.2 tok/s ⠹`（数值冻结并**整体变灰**，行尾 80ms spinner） |
-| `idle`（回合结束 / 步已完成） | `0.42s · 48.2 tok/s` |
+| 有有效步样本 | `0.42s · 48.2 tok/s`（窄屏 / 收缩时 `48.2 tok/s`） |
+| 当前步生成中（无新样本） | 与上一态完全相同——沿用最近一条已完成步的值 |
+| 首页 / 无 `sessionID` / 无任何有效样本 | 不渲染，不显示 `--` |
 
-- **`…` 只加在「单调递增的计时器」上**（对齐上游 `live.ts:196-217`）：首字时长仅 `prefill` 阶段在涨 → 带；**速度是比值，从不带 `…`**。
-- 实时值与精确值**不靠 `…` 区分**：上游用两个互斥的渲染函数（`liveStatSegs` / `pushPerfSegs`），回合结束整体切换。我们同理——`live` 有值就用实时，否则回落精确值，二者都是纯数字。
-- **工具相位：数值变灰 + 行尾 spinner**（已定）：冻结值语义上是“暂停前最近值”，但单看数字无法与「生成得慢」区分；**整行变灰（`MUTED_COLOR`）+ spinner** 表达“正在执行工具、数值冻结”。**不替换、不隐藏数值**——整行内容保持不动，避免每次工具执行时闪没再回来。
-- 无任何有效样本（新会话、无 reasoning 的模型且插件刚启动）→ 不渲染，不显示 `--`。
+- **没有 `…`**：它原本标记「正在增长的首字计时」，现在没有增长中的计时器。
+- **没有工具相位的灰色与 spinner**：不再有「冻结」概念，数字一经落库就是终值。
+- 无任何有效样本（新会话、无 reasoning 的模型、纯工具步被守卫拦下）→ 不渲染，不显示 `--`。
 
 ### 交互
 
@@ -198,6 +148,7 @@ row (width 100%, justifyContent: space-between, gap 2)
 
 ## 5. 不做的部分
 
+- **任何实时值 / 估算 / 平滑**（v4.0.0 明确移除：无估算分子、无滑窗、无卡尔曼、无在线学习系数）
 - 会话级中位数（宽度不足；单次值已能表达量级）
 - 体感 TPS 双模式（只保留"输出速度"一种：净生成时长口径）
 - 侧边栏展示（落点固定在底部状态行）
@@ -207,12 +158,14 @@ row (width 100%, justifyContent: space-between, gap 2)
 
 ## 6. 已知取舍
 
-1. **首次启动无历史**：`Map` 只在本次进程内累积，重启后历史消息仍可算（靠 reasoning/tool 时间戳），只有"直接吐正文的模型"的历史步拿不到首字。
-2. **实时值是估算**：`estimateTokens` 与供应商真实分词有误差——本机 5989 条实测**中位 0.80、加权 0.96**（纯文本 0.98~1.01，含工具 0.86，纯工具步 0.62，见 §7.3）。`session.step.ended` 后由精确值替换。
-3. **工具相位数值冻结、行尾加 spinner**：数值保留（不隐藏，避免整行闪动），spinner 是“正在执行工具”的准确信号；工具返回后 spinner 消失、速度恢复。
-4. **分母是活动时长**：没有可观测 token 的时段（含思考内容不返回的模型）不计入，因此真实卡顿不会让读数下降；需要观察卡顿时看首字计时与东西本身的行为。
+1. **首字依赖时间戳的可得性**：`text` part 没有时间字段，首字时刻只能取 `reasoning` / `tool` 的 `time.created`。直接吐正文、又无先发工具的模型，该步不产出首字（不填 0、不猜）；由工具参数开始的步，首字含工具参数的组装时间（§7.4）。
+2. **速度只反映最后一条有效步**：显示的是「最近一条通过守卫的步」，不是会话中位数；多步回合里数字会随每一步落库而刷新（这是刻意的——每次刷新都是一个真实完成步的终值）。
+3. **很短或很快的步没有速度**：`genMs < max(300ms, tok × 1.0)` 时只出首字、不出速度。
+4. **不覆盖未完成的步**：生成区间的分母包含「隐形思考」与「供应商限流」等无 token 可观测的时段，因此真实卡顿会让速度读数偏低。这是精确口径的定义，不是缺陷；需要区分「在跑命令」与「生成得慢」请直接看工具输出。
 
 ## 7. 偏高与不准的机制（已量化，2026-10-21）
+
+> **本节只对精确口径（§2）有意义**。§7.1 / 7.2 / 7.3 / 7.7 涉及的分母口径、估算分子、速率滤波全部属于已移除的实时链路（v4.0.0），保留作历史记录与「为什么不再做实时值」的证据。
 
 这两条是历史记录，其中 7.1 的机制已被推翻并修复（见该节顶部说明），保留用于说明「为什么不能按采样点算分母」。
 
@@ -325,7 +278,9 @@ v2 的 delta 走 SSE，网络抖动/宿主批量投递都会造成这种簇；�
 
 ### 7.6 处理状态
 
-已修复：
+> **v4.0.0 更新**：7.1 / 7.2 / 7.3 / 7.7 及「安全网滞后」「公式推 Q」三项的**修复对象已整体删除**（实时链路下线），本节仅保留记录。当前实现只有 §2 的精确口径，相关遗留问题见 §6。
+
+已修复（历史，对应现已删除的实时链路）：
 
 - **~~按增长事件推进 `activeMsBetween`~~ → 改为墙钟窗口**（`windowedTps` 分母 = `min(now, 最后一次增长时刻) − 窗口起点`）。旧方案仍依赖采样点位置、只是换了个锚点；正确做法是分母与采样无关。`activeMsBetween` 与 `ACTIVE_GAP_CAP_MS` 已删除。回归测试：`tests/perf.test.ts` 的「静默采样点不切断增长区间」与「读数与 delta 批次节奏无关」两条。
 - 7.2 的补发簇由同一次改动覆盖，不引入阈值机制。
@@ -338,9 +293,9 @@ v2 的 delta 走 SSE，网络抖动/宿主批量投递都会造成这种簇；�
 - **安全网滞后 0.75s**：无事件的速率突变（供应商限流）会短暂显示旧值。这是 Q=0 的固有代价；缩短它需引入有量纲的 Q（曾尝试从日志推 Q 失败，见下条）。
 - **公式推 Q 不成立**：`Q=(P99(|Δv|)·Δt)²/3` 实测漂移期误差 114%（扫描最优 q=1e-2 为 8.9%），分位数 95/99/99.5/99.9 的误差极差 190pp。根因是跳变（速率跳到 0）被摊进 Δt，制造虚假的巨大加速度。改用事件驱动后该问题消失。
 
-### 7.7 速率估计：事件驱动卡尔曼（已实现）
+### 7.7 速率估计：事件驱动卡尔曼（已随实时链路移除）
 
-`model/rate.ts`。状态 `[累计 token, 速率]`，观测是每批采样的累计估算 token。
+`model/rate.ts`（v4.0.0 已删除）。状态 `[累计 token, 速率]`，观测是每批采样的累计估算 token。
 
 **模型类别的修正**：速率是**跳变过程**而非平滑漂移——工具调用、步结束、新内容段都会让它跳。因此：
 

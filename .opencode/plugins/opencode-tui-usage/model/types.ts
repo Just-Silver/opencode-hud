@@ -49,17 +49,13 @@ export type PartTime = { created?: number; ran?: number; completed?: number }
 
 export type PerfPart = {
   type?: string
-  text?: string
   time?: PartTime
-  state?: { status?: string; input?: unknown; time?: PartTime }
 }
 
 export type PerfMessage = {
-  id?: string
   type?: string
-  time?: { created?: number; streamed?: number; completed?: number }
+  time?: { created?: number; completed?: number }
   tokens?: TokenLike
-  model?: { id?: string; providerID?: string; variant?: string }
   content?: PerfPart[]
   error?: unknown
 }

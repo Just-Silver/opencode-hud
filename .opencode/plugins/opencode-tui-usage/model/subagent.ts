@@ -66,14 +66,6 @@ export function headingOf(row: SubagentRow): string {
   return row.title || row.agent
 }
 
-// 标题后缀（紧跟「子代理」）：`（3 · 1 运行中）`
-export function summaryText(rows: readonly SubagentRow[]): string | undefined {
-  if (rows.length === 0) return undefined
-  const running = rows.filter((r) => r.running).length
-  const base = `${rows.length}`
-  return running > 0 ? `（${base} · ${running} 运行中）` : `（${base}）`
-}
-
 // 标题行的状态指示灯：运行中数 / 已完成数，形如 `●35 ●1`（上游同款形态）。
 // 与上游的差别：两个数的语义在文档里写死——橙点=运行中、绿点=已完成，
 // 不上游那种「●N 是已完成、另一个 ●N 是失败」的歧义。

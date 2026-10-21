@@ -2,17 +2,13 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
-  computeLivePerf,
   computePerfSample,
-  estimateParts,
-  estimateTokens,
   firstContentStart,
   latestPerf,
   mergedIntervalMs,
   subagentElapsedMs,
   subagentTokens,
   toolIntervals,
-  windowedTps,
 } from "../.opencode/plugins/opencode-tui-usage/model/perf.ts"
 import type { PerfMessage } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
 import {
@@ -128,159 +124,6 @@ test("latestPerf：首字与速度分别回溯最近有效值", () => {
   const out = latestPerf(messages)
   assert.equal(out.ttftMs, 100) // 最后一条自身有效
   assert.equal(Math.round(out.tps!), 57) // 回退到上一条：200 / 3500ms
-})
-
-// ─── estimateTokens ───
-test("estimateTokens：汉字 1.5 字/token、ASCII 统一系数、空串为 0", () => {
-  assert.equal(estimateTokens(""), 0)
-  assert.equal(estimateTokens("你好"), 2) // 2/1.5 → ceil 2
-  assert.equal(estimateTokens("abcd"), 2) // 4/2.85 → ceil 2
-})
-
-// ─── computeLivePerf ───
-test("computeLivePerf：首字前累计等待时长，速度沿用历史", () => {
-  const m = assistant({ time: { created: 1000 }, content: [] })
-  const live = computeLivePerf(m, undefined, 1500, { tps: 42 })!
-  assert.equal(live.phase, "prefill")
-  assert.equal(live.ttftMs, 500) // now − created，等待中
-  assert.equal(live.tps, 42)
-
-  // 等待继续推进，时长为 3s
-  assert.equal(computeLivePerf(m, undefined, 4000, { tps: 42 })!.ttftMs, 3000)
-})
-
-test("computeLivePerf：工具运行中冻结速度（不衰减、不归零）", () => {
-  const m = assistant({
-    time: { created: 1000 },
-    tokens: { output: 0 },
-    content: [
-      { type: "reasoning", text: "abc", time: { created: 1500 } },
-      { type: "tool", state: { status: "running" }, time: { created: 3000, ran: 3000 } },
-    ],
-  })
-  const live = computeLivePerf(m, 1500, 9000, { tps: 48.2 })!
-  assert.equal(live.phase, "tool")
-  assert.equal(live.tps, 48.2) // 冻结
-  assert.equal(live.ttftMs, 500)
-})
-
-test("computeLivePerf：生成中按估算 token / 净时长计算", () => {
-  const m = assistant({
-    time: { created: 1000 },
-    tokens: { output: 0 },
-    // 400 个 ASCII 字符；按先验系数（字母 1/3.95）≈ 101 tok
-    content: [{ type: "reasoning", text: "a".repeat(400), time: { created: 1500 } }],
-  })
-  const live = computeLivePerf(m, 1500, 4500)! // 3s 窗口
-  assert.equal(live.phase, "streaming")
-  const est = estimateParts(m.content as never)
-  assert.ok(est > 95 && est < 110, `估算 ${est} 应接近 100`)
-  assert.equal(Math.round(live.tps!), Math.round((est / 3000) * 1000))
-})
-
-// ─── 滑动窗口速度（回归：累计口径会单调下降） ───
-test("windowedTps：窗口内增量 / 净时长，不受历史累积影响", () => {
-  // 前 10s 已累积 1000 tok（历史），最近 2s 又产出 100 tok
-  const samples = [
-    { at: 0, tok: 0 },
-    { at: 10_000, tok: 1000 },
-    { at: 11_000, tok: 1050 },
-    { at: 12_000, tok: 1100 },
-  ]
-  const tps = windowedTps(samples, 12_000, 10_000)!
-  assert.equal(Math.round(tps), 50) // 100 tok / 2s，而不是 1100/12s
-})
-
-test("windowedTps：静默时段靠窗口起点排除，不靠采样间隔累加", () => {
-  // 0~1000ms 静默（工具执行），1000~2000ms 产出 50 tok。
-  // 调用方把 windowStart 钳到工具结束（1000）之后，分母就只剩真实生成跨度。
-  const samples = [
-    { at: 0, tok: 0 },
-    { at: 1000, tok: 0 },
-    { at: 1500, tok: 25 },
-    { at: 2000, tok: 50 },
-  ]
-  // 窗口起点未钳位（含工具期）→ 分母 2000ms，读数被压低
-  assert.equal(Math.round(windowedTps(samples, 2000, 0)!), 25)
-  // 钳位到工具结束后 → 分母 1000ms，读数反映真实生成速度
-  assert.equal(Math.round(windowedTps(samples, 2000, 1000)!), 50)
-})
-
-test("windowedTps：静默采样点不切断增长区间（心跳插在批次之间不得抬高读数）", () => {
-  // 真实 50 tok/s：每 200ms 到一批 10 tok。250ms 心跳会插在批次之间，
-  // 若静默采样推进计时锚点，每 400ms 里只有 200ms 被计入 → 读数翻倍。
-  const samples: { at: number; tok: number }[] = []
-  for (let t = 0; t <= 4000; t += 100) {
-    samples.push({ at: t, tok: Math.floor(t / 200) * 10 })
-  }
-  const tps = windowedTps(samples, 4000, 2000)!
-  assert.ok(tps > 45 && tps < 56, `读数 ${tps.toFixed(1)} 应接近真实 50（静默采样不得抬高分母占比）`)
-})
-
-test("windowedTps：整窗静默 → undefined（沿用上一值，不衰减）", () => {
-  const samples = [
-    { at: 0, tok: 100 },
-    { at: 2000, tok: 100 },
-  ]
-  assert.equal(windowedTps(samples, 2000, 0), undefined)
-})
-
-test("windowedTps：样本或有效时长不足 → undefined（不猜）", () => {
-  assert.equal(windowedTps([{ at: 0, tok: 0 }], 1000, 0), undefined)
-  assert.equal(windowedTps([{ at: 0, tok: 0 }, { at: 300, tok: 10 }], 300, 0), undefined)
-})
-
-test("回归：起始高速后转速恒定，窗口速度会收敛而不是一路下滑", () => {
-  const created = 1000
-  const firstStart = 1500
-  // 1.5~2.0s 高速 200 tok/s，之后恒定 50 tok/s
-  const textAt = (t: number) => {
-    const chars =
-      t <= 2000
-        ? ((t - firstStart) / 1000) * 200 * 4
-        : 200 * 4 + ((t - 2000) / 1000) * 50 * 4
-    return "a".repeat(Math.floor(chars))
-  }
-  const samples: { at: number; tok: number }[] = []
-  const values: number[] = []
-  for (let t = 1500; t <= 12000; t += 250) {
-    const message = {
-      type: "assistant",
-      time: { created },
-      content: [{ type: "reasoning", text: textAt(t), time: { created: firstStart } }],
-    }
-    const tok = estimateParts(message.content as never)
-    samples.push({ at: t, tok })
-    const live = computeLivePerf(message as never, firstStart, t, { samples })!
-    if (live.tps !== undefined) values.push(live.tps)
-  }
-  // 尾部应收敛到 ~50 而不是持续下降
-  const tail = values.slice(-6)
-  for (const v of tail) assert.ok(v > 40 && v < 65, `尾部速度 ${v.toFixed(1)} 应接近 50`)
-  // 且不再单调下降（旧累计口径的特征）
-  const last = values[values.length - 1]
-  const mid = values[Math.floor(values.length / 2)]
-  assert.ok(last >= mid * 0.8, `末值 ${last.toFixed(1)} 不应显著低于中段 ${mid.toFixed(1)}`)
-})
-
-test("windowedTps：读数与 delta 批次节奏无关（墙钟窗口口径）", () => {
-  // 同样真实 50 tok/s，delta 每 100/300/800ms 到一批 + 250ms 心跳插在其中。
-  // 旧口径（按「观测到增长的采样间隔」累加分母）在粗批次下会翻倍甚至冻结；
-  // 墙钟窗口口径下三者都应落在真实值附近。
-  for (const batch of [100, 300, 800]) {
-    const samples: { at: number; tok: number }[] = []
-    const times = new Set<number>()
-    for (let t = 0; t <= 6000; t += 250) times.add(t)
-    for (let t = 0; t <= 6000; t += batch) times.add(t)
-    for (const at of [...times].sort((a, b) => a - b)) {
-      samples.push({ at, tok: Math.floor(Math.floor(at / batch) * batch * 0.05) })
-    }
-    const tps = windowedTps(samples, 6000, 4000)!
-    assert.ok(
-      tps > 40 && tps < 60,
-      `delta ${batch}ms 时读数 ${tps.toFixed(1)} 应接近真实 50`,
-    )
-  }
 })
 
 // ─── 子代理 ───

@@ -37,7 +37,7 @@
 | 当前供应商 ID | 最后一条带 `providerID`/`model` 的消息 | 最新语义，同上 |
 | 子代理列表 | `session.family(sessionID)` | 客户端 `listChildren` 走完全部分页（200/页）→ 全量 |
 | 子代理用量 / 耗时 / 标题 | 各子会话自己的 `SessionInfo`（`tokens`/`time`/`title`/`agent`） | 权威全量；耗时用 `time.idle` 并在 UI 侧高水位钳制 |
-| 性能（首字/速度） | 事件流（`live/recorder.ts`）+ 最新一条消息的精确样本 | 最新语义 |
+| 性能（首字/速度） | 最新一条已完成 assistant 消息的「精确样本」（`session.message.list()` 内存投影，再逐条 `computePerfSample`） | 最新语义；纯内存，**不读 DB**、无实时估算 |
 | 额度 | 供应商 HTTP 端点（由 `providers/*.ts` 自持）+ 凭据解析 `quota/key.ts` | 凭据顺序：配置（cwd 起逐级向上 → 全局）→ DB `credential` 兜底 |
 | 更新提示 | `github.com/<repo>/releases/latest` 的 302 tag + 本地缓存文件 | 不用 `api.github.com`（未认证限流/403） |
 
