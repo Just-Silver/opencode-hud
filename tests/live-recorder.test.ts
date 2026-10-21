@@ -2,6 +2,7 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { createRecorder, previousPerf, type HostLike } from "../.opencode/plugins/opencode-tui-usage/live/recorder.ts"
+import { bucketKey, createCoefficientBook, predictTokens } from "../.opencode/plugins/opencode-tui-usage/model/calibration.ts"
 import type { PerfMessage } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
 
 // 假宿主：事件总线 + 会话状态 + 消息列表，全部可控
@@ -276,4 +277,184 @@ test("回归：首字不冻结也不随 now 变化", () => {
     assert.equal(rec.live("s1")!.ttftMs, 500, "首字是常量")
   }
   rec.dispose()
+})
+
+// ─── 系数学习接入：真实 token 反哺估算 ───
+test("学习：已结束的步用真实 token 反哺，估算随之变准", () => {
+  const book = createCoefficientBook()
+  const key = bucketKey("p", "m")
+  const fake = fakeHost({ status: "running" })
+
+  // 构造若干已结束的步：800 个 ASCII 字母 + 1 次工具，真实 250 tok
+  const done: PerfMessage[] = []
+  for (let i = 0; i < 120; i++) {
+    done.push({
+      id: `h${i}`,
+      type: "assistant",
+      time: { created: 1000 + i * 100, completed: 1500 + i * 100 },
+      tokens: { output: 250, reasoning: 0 },
+      model: { providerID: "p", id: "m" },
+      content: [
+        { type: "text", text: "a".repeat(800), time: { created: 1400 + i * 100 } },
+        { type: "tool", state: { input: {} }, time: { created: 1400 + i * 100 } },
+      ],
+    })
+  }
+  fake.setMessages(done)
+  const rec = createRecorder(fake.host, () => {}, { now: () => 99999, book })
+
+  const before = predictTokens(book.coefficient(key), {
+    counts: { letter: 800, digit: 0, punct: 0, cjk: 0 },
+    tools: 1,
+  })
+  rec.live("s1")
+  const after = predictTokens(book.coefficient(key), {
+    counts: { letter: 800, digit: 0, punct: 0, cjk: 0 },
+    tools: 1,
+  })
+  rec.dispose()
+
+  assert.notEqual(after, before, "学习后系数应改变")
+  assert.ok(Math.abs(after / 250 - 1) < 0.15, `学习后估算 ${after.toFixed(0)} 应接近真实 250`)
+})
+
+test("学习：同一步重复 live() 不会重复计入", () => {
+  const book = createCoefficientBook()
+  const fake = fakeHost({ status: "running" })
+  const msg: PerfMessage = {
+    id: "m1",
+    type: "assistant",
+    time: { created: 1000, completed: 2000 },
+    tokens: { output: 100, reasoning: 0 },
+    model: { providerID: "p", id: "m" },
+    content: [{ type: "text", text: "a".repeat(300), time: { created: 1500 } }],
+  }
+  fake.setMessages([msg])
+  const rec = createRecorder(fake.host, () => {}, { now: () => 99999, book })
+  for (let i = 0; i < 5; i++) rec.live("s1")
+  rec.dispose()
+  assert.equal(book.sentinel(bucketKey("p", "m")).samples, 1, "同一步只应计入一次")
+})
+
+test("学习：未结束的步不学习（等 tokens 写回）", () => {
+  const book = createCoefficientBook()
+  const fake = fakeHost({ status: "running" })
+  fake.setMessages([
+    {
+      id: "m1",
+      type: "assistant",
+      time: { created: 1000 }, // 无 completed
+      tokens: { output: 100 },
+      model: { providerID: "p", id: "m" },
+      content: [{ type: "text", text: "a".repeat(300), time: { created: 1500 } }],
+    },
+  ])
+  const rec = createRecorder(fake.host, () => {}, { now: () => 5000, book })
+  rec.live("s1")
+  rec.dispose()
+  assert.equal(book.sentinel(bucketKey("p", "m")).samples, 0, "未完成不计入学习")
+})
+
+// ─── 事件驱动学习：step.ended 自带 tokens ───
+test("学习：step.ended 事件立即反哺，不必等消息列表标记完成", () => {
+  const book = createCoefficientBook()
+  const key = bucketKey("p", "m")
+  const fake = fakeHost({ status: "running" })
+  // 消息尚未标记 completed（投影滞后），但 step.ended 已经带 tokens
+  fake.setMessages([
+    {
+      id: "m1",
+      type: "assistant",
+      time: { created: 1000 }, // 无 completed
+      tokens: { output: 0 },
+      model: { providerID: "p", id: "m" },
+      content: [{ type: "text", text: "a".repeat(400), time: { created: 1500 } }],
+    },
+  ])
+  const rec = createRecorder(fake.host, () => {}, { now: () => 5000, book })
+  fake.emit("session.step.ended", {
+    created: 5000,
+    data: { sessionID: "s1", assistantMessageID: "m1", tokens: { output: 100, reasoning: 0 } },
+  })
+  rec.dispose()
+  assert.equal(book.sentinel(key).samples, 1, "事件驱动应立即学到一条")
+})
+
+test("学习：step.ended 与后续列表轮询不会重复计入同一步", () => {
+  const book = createCoefficientBook()
+  const key = bucketKey("p", "m")
+  const fake = fakeHost({ status: "running" })
+  const msg: PerfMessage = {
+    id: "m1",
+    type: "assistant",
+    time: { created: 1000 },
+    tokens: { output: 0 },
+    model: { providerID: "p", id: "m" },
+    content: [{ type: "text", text: "a".repeat(400), time: { created: 1500 } }],
+  }
+  fake.setMessages([msg])
+  const rec = createRecorder(fake.host, () => {}, { now: () => 5000, book })
+
+  fake.emit("session.step.ended", {
+    created: 5000,
+    data: { sessionID: "s1", assistantMessageID: "m1", tokens: { output: 100, reasoning: 0 } },
+  })
+  // 之后列表刷新（completed + tokens 都写回），再走一次 live() 的轮询路径
+  fake.setMessages([{ ...msg, time: { created: 1000, completed: 4500 }, tokens: { output: 100, reasoning: 0 } }])
+  rec.live("s1")
+  rec.dispose()
+  assert.equal(book.sentinel(key).samples, 1, "同一步只应计入一次")
+})
+
+test("学习：step.ended 缺 tokens 或消息未找到时不学（不猜）", () => {
+  const book = createCoefficientBook()
+  const fake = fakeHost({ status: "running" })
+  fake.setMessages([])
+  const rec = createRecorder(fake.host, () => {}, { now: () => 5000, book })
+  // 缺 tokens
+  fake.emit("session.step.ended", { data: { sessionID: "s1", assistantMessageID: "m1" } })
+  // 有 tokens 但消息列表里没有该步（拿不到特征）
+  fake.emit("session.step.ended", { data: { sessionID: "s1", assistantMessageID: "m2", tokens: { output: 50 } } })
+  rec.dispose()
+  assert.equal(book.sentinel(bucketKey("p", "m")).samples, 0)
+})
+
+// ─── 安全网：检测当帧不得采用「按旧模型算出的」错值 ───
+test("安全网：速率突降时 1 秒内自动纠正（检测前允许短暂滞后）", () => {
+  // 稳定 120 tok/s 让滤波器收敛，然后骤降到 25 tok/s（无事件通知）。
+  // 真实行为：检测需要累积几次偏置，检测到之前会短暂沿用旧值——这是安全网的固有
+  // 滞后（实测约 0.75s），不是缺陷；要求的是「1 秒内纠正到真值附近」。
+  const fake = fakeHost({ status: "running" })
+  const book = createCoefficientBook()
+  const CHARS_PER_TOKEN = 4
+  let text = ""
+  let now = 1792500000000
+  const rec = createRecorder(fake.host, () => {}, { now: () => now, book })
+  const shown: (number | undefined)[] = []
+
+  const push = (t: number, chars: number) => {
+    now = 1792500000000 + t
+    text += "a".repeat(chars)
+    fake.setMessages([{
+      id: "cur", type: "assistant",
+      time: { created: 1792500000000 },
+      tokens: { output: 0 },
+      model: { providerID: "p", id: "m" },
+      content: [{ type: "reasoning", text, time: { created: 1792500000050 } }],
+    }])
+    return rec.live("s1")
+  }
+
+  for (let t = 0; t < 12000; t += 250) push(t, Math.round((120 * 250) / 1000) * CHARS_PER_TOKEN)
+  for (let t = 12000; t < 16000; t += 250) shown.push(push(t, Math.round((25 * 250) / 1000) * CHARS_PER_TOKEN)?.tps)
+  rec.dispose()
+
+  const defined = shown.filter((v) => v !== undefined) as number[]
+  assert.ok(defined.length >= 8, "应有足够读数")
+  // 1 秒（4 个采样）之内必须纠正
+  const within1s = defined.slice(0, 4).filter((v) => Math.abs(v / 25 - 1) < 0.25)
+  assert.ok(within1s.length > 0, `前 1 秒内应已纠正，实际 ${defined.slice(0, 4).map((v) => v.toFixed(0)).join(",")}`)
+  // 且迟迟不纠正即为缺陷：2 秒后必须稳定在真值
+  const later = defined.slice(8)
+  for (const v of later) assert.ok(Math.abs(v / 25 - 1) < 0.25, `2 秒后读数 ${v.toFixed(1)} 应接近 25`)
 })

@@ -131,11 +131,10 @@ test("latestPerf：首字与速度分别回溯最近有效值", () => {
 })
 
 // ─── estimateTokens ───
-test("estimateTokens：汉字 1.5、ASCII 按画像、空串为 0", () => {
+test("estimateTokens：汉字 1.5 字/token、ASCII 统一系数、空串为 0", () => {
   assert.equal(estimateTokens(""), 0)
   assert.equal(estimateTokens("你好"), 2) // 2/1.5 → ceil 2
-  assert.equal(estimateTokens("abcd", "thinking"), 1) // 4/4.0
-  assert.equal(estimateTokens("abcd", "answer"), 2) // 4/2.9 → ceil 2
+  assert.equal(estimateTokens("abcd"), 2) // 4/2.85 → ceil 2
 })
 
 // ─── computeLivePerf ───
@@ -169,12 +168,14 @@ test("computeLivePerf：生成中按估算 token / 净时长计算", () => {
   const m = assistant({
     time: { created: 1000 },
     tokens: { output: 0 },
-    // 400 个 ASCII 思考字符 → 100 tok
+    // 400 个 ASCII 字符；按先验系数（字母 1/3.95）≈ 101 tok
     content: [{ type: "reasoning", text: "a".repeat(400), time: { created: 1500 } }],
   })
   const live = computeLivePerf(m, 1500, 4500)! // 3s 窗口
   assert.equal(live.phase, "streaming")
-  assert.equal(Math.round(live.tps!), 33) // 100 / 3s
+  const est = estimateParts(m.content as never)
+  assert.ok(est > 95 && est < 110, `估算 ${est} 应接近 100`)
+  assert.equal(Math.round(live.tps!), Math.round((est / 3000) * 1000))
 })
 
 // ─── 滑动窗口速度（回归：累计口径会单调下降） ───
@@ -190,16 +191,30 @@ test("windowedTps：窗口内增量 / 净时长，不受历史累积影响", () 
   assert.equal(Math.round(tps), 50) // 100 tok / 2s，而不是 1100/12s
 })
 
-test("windowedTps：无 token 增长的间隔不计入分母（工具/等待）", () => {
-  // 0~1000ms 静默（工具执行），1000~2000ms 产出 50 tok
+test("windowedTps：静默时段靠窗口起点排除，不靠采样间隔累加", () => {
+  // 0~1000ms 静默（工具执行），1000~2000ms 产出 50 tok。
+  // 调用方把 windowStart 钳到工具结束（1000）之后，分母就只剩真实生成跨度。
   const samples = [
     { at: 0, tok: 0 },
     { at: 1000, tok: 0 },
     { at: 1500, tok: 25 },
     { at: 2000, tok: 50 },
   ]
-  // 活动时长 1000ms（只有后半段），不是 2000ms
-  assert.equal(Math.round(windowedTps(samples, 2000, 0)!), 50)
+  // 窗口起点未钳位（含工具期）→ 分母 2000ms，读数被压低
+  assert.equal(Math.round(windowedTps(samples, 2000, 0)!), 25)
+  // 钳位到工具结束后 → 分母 1000ms，读数反映真实生成速度
+  assert.equal(Math.round(windowedTps(samples, 2000, 1000)!), 50)
+})
+
+test("windowedTps：静默采样点不切断增长区间（心跳插在批次之间不得抬高读数）", () => {
+  // 真实 50 tok/s：每 200ms 到一批 10 tok。250ms 心跳会插在批次之间，
+  // 若静默采样推进计时锚点，每 400ms 里只有 200ms 被计入 → 读数翻倍。
+  const samples: { at: number; tok: number }[] = []
+  for (let t = 0; t <= 4000; t += 100) {
+    samples.push({ at: t, tok: Math.floor(t / 200) * 10 })
+  }
+  const tps = windowedTps(samples, 4000, 2000)!
+  assert.ok(tps > 45 && tps < 56, `读数 ${tps.toFixed(1)} 应接近真实 50（静默采样不得抬高分母占比）`)
 })
 
 test("windowedTps：整窗静默 → undefined（沿用上一值，不衰减）", () => {
@@ -246,6 +261,26 @@ test("回归：起始高速后转速恒定，窗口速度会收敛而不是一�
   const last = values[values.length - 1]
   const mid = values[Math.floor(values.length / 2)]
   assert.ok(last >= mid * 0.8, `末值 ${last.toFixed(1)} 不应显著低于中段 ${mid.toFixed(1)}`)
+})
+
+test("windowedTps：读数与 delta 批次节奏无关（墙钟窗口口径）", () => {
+  // 同样真实 50 tok/s，delta 每 100/300/800ms 到一批 + 250ms 心跳插在其中。
+  // 旧口径（按「观测到增长的采样间隔」累加分母）在粗批次下会翻倍甚至冻结；
+  // 墙钟窗口口径下三者都应落在真实值附近。
+  for (const batch of [100, 300, 800]) {
+    const samples: { at: number; tok: number }[] = []
+    const times = new Set<number>()
+    for (let t = 0; t <= 6000; t += 250) times.add(t)
+    for (let t = 0; t <= 6000; t += batch) times.add(t)
+    for (const at of [...times].sort((a, b) => a - b)) {
+      samples.push({ at, tok: Math.floor(Math.floor(at / batch) * batch * 0.05) })
+    }
+    const tps = windowedTps(samples, 6000, 4000)!
+    assert.ok(
+      tps > 40 && tps < 60,
+      `delta ${batch}ms 时读数 ${tps.toFixed(1)} 应接近真实 50`,
+    )
+  }
 })
 
 // ─── 子代理 ───

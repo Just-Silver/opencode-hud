@@ -2,6 +2,17 @@
 // 口径见 docs/design-performance-footer.md：分母不含首字等待，工具执行区间按并集扣除。
 // 无 solid / UI / 宿主依赖，可直接单测。
 import type { PerfMessage, PerfPart } from "./types.ts"
+import {
+  addFeatures,
+  classifyChars,
+  predictTokens,
+  PRIOR_COEFFICIENTS,
+  type Coefficients,
+  type StepFeatures,
+} from "./calibration.ts"
+
+// 特征累加的空起点（避免每步重复构造）
+const ZERO_COUNTS = { letter: 0, digit: 0, punct: 0, cjk: 0 } as const
 
 // 精确侧守卫：短窗口与小步的比值不可信（见设计文档「守卫」）
 export const MIN_GEN_MS = 300
@@ -10,8 +21,9 @@ export const BUFFER_MS_PER_TOKEN = 1.0
 export const LIVE_MIN_GEN_MS = 500
 export const LIVE_MIN_TOK = 8
 
-// token 密度画像（ASCII 字/token），来源见设计文档
-const ASCII_PER_TOKEN = { thinking: 4.0, answer: 2.9, code: 3.7 } as const
+// ASCII 字/token 的粗估基准（无系数上下文时用）。实时路径改用在线学习的逐类系数，
+// 见 model/calibration.ts 与 docs/design-performance-footer.md §7。
+const ASCII_PER_TOKEN = 2.85
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 
@@ -73,20 +85,35 @@ export function lastToolEnd(parts: readonly PerfPart[]): number | undefined {
   return end
 }
 
-// 估算分子：文本按形态分画像；工具参数一并计入（参数也是模型生成的 token，
-// 参数流式期 state.input 是逐步拼接的字符串，长度即增量）。
-export function estimateParts(parts: readonly PerfPart[]): number {
-  let estTok = 0
+// 估算分子：逐类字符计数后按「可学习系数」折算；工具参数与工具调用次数一并计入
+//（参数也是模型生成的 token，参数流式期 state.input 是逐步拼接的字符串，长度即增量）。
+export function estimateParts(parts: readonly PerfPart[], coef: Coefficients = PRIOR_COEFFICIENTS): number {
+  let features: StepFeatures = { counts: ZERO_COUNTS, tools: 0 }
   for (const p of parts) {
     if (p.type === "text" || p.type === "reasoning") {
-      estTok += estimateTokens(p.text ?? "", p.type === "reasoning" ? "thinking" : "answer")
+      features = addFeatures(features, classifyChars(p.text ?? ""))
     } else if (p.type === "tool") {
       const input = p.state?.input
       const raw = typeof input === "string" ? input : input == null ? "" : JSON.stringify(input)
-      if (raw) estTok += estimateTokens(raw, "code")
+      if (raw) features = addFeatures(features, classifyChars(raw), 1)
     }
   }
-  return estTok
+  return predictTokens(coef, features)
+}
+
+// 一步的特征向量（供在线学习使用：与 estimateParts 同一口径）
+export function stepFeatures(parts: readonly PerfPart[]): StepFeatures {
+  let features: StepFeatures = { counts: ZERO_COUNTS, tools: 0 }
+  for (const p of parts) {
+    if (p.type === "text" || p.type === "reasoning") {
+      features = addFeatures(features, classifyChars(p.text ?? ""))
+    } else if (p.type === "tool") {
+      const input = p.state?.input
+      const raw = typeof input === "string" ? input : input == null ? "" : JSON.stringify(input)
+      features = addFeatures(features, raw ? classifyChars(raw) : ZERO_COUNTS, 1)
+    }
+  }
+  return features
 }
 
 // 单个工具的执行区间；未执行/未结束时返回 undefined
@@ -178,8 +205,9 @@ export function latestPerf(messages: readonly PerfMessage[]): {
 
 // ── 实时值 ──
 
-// 估算文本 token 数：汉字 1.5 字/token，假名/全角 1 字/token，ASCII 按画像折算
-export function estimateTokens(text: string, profile: keyof typeof ASCII_PER_TOKEN = "answer"): number {
+// 估算文本 token 数：汉字 1.5 字/token，假名/全角 1 字/token，ASCII 按统一系数折算。
+// 保留为「无系数上下文时的粗估」；实时路径优先走 calibratable 版本（见 model/calibration.ts）。
+export function estimateTokens(text: string): number {
   if (!text) return 0
   let ascii = 0
   let wide = 0
@@ -196,7 +224,7 @@ export function estimateTokens(text: string, profile: keyof typeof ASCII_PER_TOK
       wide++
     else ascii++
   }
-  const value = ascii / ASCII_PER_TOKEN[profile] + wide + han / 1.5
+  const value = ascii / ASCII_PER_TOKEN + wide + han / 1.5
   return value > 0 ? Math.ceil(value) : 0
 }
 
@@ -204,10 +232,8 @@ export function estimateTokens(text: string, profile: keyof typeof ASCII_PER_TOK
 // 累计平均在开头一簇 token 到达后会单调衰减（分子不再涨、分母一直涨），
 // 实测：起始 200 tok/s 后恒定 50 tok/s，累计口径会一路从 225 掉到 88 且永不回收。
 export const LIVE_WINDOW_MS = 2000
-// 窗口内有效生成时长的下限：太短则比值不可信
+// 窗口内有效生成跨度的下限：太短则比值不可信
 export const LIVE_MIN_SPAN_MS = 800
-// 单个「有产出」间隔的上限：一次长停顿后补发的 token 不能被算成整段都在生成
-export const ACTIVE_GAP_CAP_MS = 1250
 
 // 累计估算的一次观测（tok 为该时刻的累计估算值）
 export type SamplePoint = { at: number; tok: number }
@@ -217,35 +243,13 @@ export function toolMsBetween(parts: readonly PerfPart[], lo: number, hi: number
   return mergedIntervalMs(toolIntervals(parts), lo, hi)
 }
 
-// [start, now] 内的「活动时长」：只累计 token 有增长的采样间隔。
-// 无 token 产出的时段（等待首字、隐形思考、工具执行、工具返回后重新 prefill）
-// 属于等待，不该出现在速度分母里；单段封顶避免一次停顿后的补发被算成整段生成。
-export function activeMsBetween(
-  samples: readonly SamplePoint[],
-  start: number,
-  now: number,
-): number {
-  if (samples.length < 2) return 0
-  const from = Math.max(start, samples[0].at)
-  const end = Math.min(now, samples[samples.length - 1].at)
-  if (end <= from) return 0
-
-  let total = 0
-  let prevAt = from
-  let prevTok = tokAt(samples, from) ?? samples[0].tok
-  for (const s of samples) {
-    if (s.at <= prevAt) continue
-    if (s.at > end) break
-    if (s.tok > prevTok) total += Math.min(s.at - prevAt, ACTIVE_GAP_CAP_MS)
-    prevAt = s.at
-    prevTok = s.tok
-  }
-  return total
-}
-
-// 滑动窗口速度：只用窗口内的增量与「活动时长」。
+// 滑动窗口速度：窗口内增量 / 窗口墙钟长度。
 // windowStart 由调用方指定（已钳位到「生成起点 / 最近工具结束」之后），
 // 避免把工具执行期或生成开始前的空档算进分母。
+//
+// 分母是「窗口的真实时间跨度」，不是「观测到增长的采样间隔之和」：后者取决于
+// delta 何时到达（批次越粗、心跳采样越密，被计入的区间越碎），读数会成倍偏高
+// 甚至冻结；墙钟跨度由时间戳唯一确定，与采样节奏无关。
 export function windowedTps(
   samples: readonly SamplePoint[],
   now: number,
@@ -260,13 +264,27 @@ export function windowedTps(
   const baseTok = tokAt(samples, start)
   if (baseTok === undefined) return undefined
 
-  const last = samples[samples.length - 1]
-  if (last.at - start <= 0) return undefined
-  const active = activeMsBetween(samples, start, now)
-  if (active < LIVE_MIN_SPAN_MS) return undefined
-  const deltaTok = last.tok - baseTok
+  // 终点取「最后一次观测到增长」而非末样本：批间隔较粗时，末尾那段尚未到货的
+  // 时间若计入分母会把读数压低（它既可能是正在生成、也可能已经停了，无法区分）。
+  let prevTok = baseTok
+  let end = start
+  let endTok = baseTok
+  for (const s of samples) {
+    if (s.at <= start) {
+      prevTok = Math.max(prevTok, s.tok)
+      continue
+    }
+    if (s.tok > prevTok) {
+      end = s.at
+      endTok = s.tok
+    }
+    prevTok = Math.max(prevTok, s.tok)
+  }
+  const span = Math.min(now, end) - start
+  if (span < LIVE_MIN_SPAN_MS) return undefined
+  const deltaTok = endTok - baseTok
   if (deltaTok < LIVE_MIN_TOK) return undefined
-  return (deltaTok / active) * 1000
+  return (deltaTok / span) * 1000
 }
 
 // 估算时刻 at 的累计 token：线性插值；早于首样本返回首样本值，晚于末样本返回末样本值
@@ -299,6 +317,10 @@ export type LiveOpts = {
   tps?: number
   // 当前消息的累计估算观测序列（含本次），用于滑动窗口
   samples?: readonly SamplePoint[]
+  // 本步所属的估算系数（按 provider/model 分桶）；缺省用先验
+  coefficient?: Coefficients
+  // 卡尔曼速率估计（事件驱动）；给出时优先于窗口口径
+  rate?: number
 }
 
 export function computeLivePerf(
@@ -330,14 +352,16 @@ export function computeLivePerf(
     return { phase: "prefill", ttftMs: Math.max(0, now - created), tps: opts?.tps }
   }
 
-  const estTok = estimateParts(parts)
+  const estTok = estimateParts(parts, opts?.coefficient)
   const totalToolMs = toolMsBetween(parts, firstStart, now)
   const elapsed = Math.max(0, now - firstStart - totalToolMs)
 
-  // 优先滑动窗口（需要足够长的运行时间才有意义）；早期用累计值，二者此时等价。
-  // 窗口起点不得跨过最近一次工具执行：工具刚返回时若把工具期的空档算进分母，速度会骤降。
+  // 速度来源优先级：卡尔曼速率估计（事件驱动，无窗口/阈值）→ 窗口口径兜底。
+  // 卡尔曼不给值（刚启动、样本积累不足）时才回落到窗口，二者都无则沿用上一值。
   let tps: number | undefined
-  if (opts?.samples && opts.samples.length >= 2 && elapsed >= LIVE_WINDOW_MS) {
+  if (opts?.rate !== undefined) {
+    tps = opts.rate
+  } else if (opts?.samples && opts.samples.length >= 2 && elapsed >= LIVE_WINDOW_MS) {
     const floor = Math.max(firstStart, lastToolEnd(parts) ?? firstStart)
     const windowStart = Math.max(floor, now - LIVE_WINDOW_MS)
     tps = windowedTps(opts.samples, now, windowStart)

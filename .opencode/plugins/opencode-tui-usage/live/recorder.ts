@@ -9,9 +9,21 @@ import {
   firstContentStart,
   LIVE_WINDOW_MS,
   runningTool,
+  stepFeatures,
   type LivePerf,
   type SamplePoint,
 } from "../model/perf.ts"
+import { bucketKey, createCoefficientBook, type CoefficientBook } from "../model/calibration.ts"
+import { createRateFilter, type RateFilter } from "../model/rate.ts"
+
+// 进程内单例：系数学习状态只存内存，不落盘（重启后从先验重新学习）
+let singletonBook: CoefficientBook | undefined
+export function getCoefficientBook(): CoefficientBook {
+  return (singletonBook ??= createCoefficientBook())
+}
+export function resetCoefficientBook(): void {
+  singletonBook = undefined
+}
 import { createThrottledBumper } from "../shared/throttle.ts"
 
 // 高频增量的刷新节流：v2 的 delta 按 ~100ms 批次下发
@@ -65,12 +77,69 @@ export function previousPerf(
   return undefined
 }
 
+// 一步已结束（tokens 已写回）→ 用真实 token 反哺系数学习。
+// 只在「上一步刚完成」时喂一次，靠 messageID 去重（同一 message 不会重复计入）。
+export function learnFromCompleted(
+  book: CoefficientBook,
+  messages: readonly PerfMessage[],
+  seen: Set<string>,
+): void {
+  for (const m of messages) {
+    if (m.type !== "assistant" || m.error) continue
+    const id = m.id
+    if (!id || seen.has(id)) continue
+    const output = Number(m.tokens?.output ?? 0)
+    const reasoning = Number(m.tokens?.reasoning ?? 0)
+    const actual = output + reasoning
+    // 未结束或没有可学习量：不标记 seen（等它完成后再学）
+    if (typeof m.time?.completed !== "number") continue
+    seen.add(id)
+    if (actual <= 0) continue
+    const key = bucketKey(m.model?.providerID, m.model?.id)
+    book.observe(key, stepFeatures(m.content ?? []), actual)
+  }
+}
+
+// 事件驱动的学习：`session.step.ended` 自带该步的真实 tokens，
+// 不必等消息列表刷新（列表是异步投影，可能滞后一拍）。
+// 返回 true 表示这条事件被采纳（用于去重：之后轮询到同一 message 不再重复喂）。
+export function learnFromStepEnded(
+  book: CoefficientBook,
+  messages: readonly PerfMessage[],
+  seen: Set<string>,
+  event: { data?: { assistantMessageID?: unknown; tokens?: unknown } },
+): void {
+  const id = event?.data?.assistantMessageID
+  if (typeof id !== "string" || seen.has(id)) return
+  const tokens = event?.data?.tokens as
+    | { output?: unknown; reasoning?: unknown }
+    | undefined
+  if (!tokens) return
+  const actual = Number(tokens.output ?? 0) + Number(tokens.reasoning ?? 0)
+  if (!Number.isFinite(actual) || actual <= 0) return
+  // 从消息列表取该步的特征与模型（特征只能从内容算，事件里没有）
+  const message = messages.find((m) => m.id === id)
+  if (!message) return
+  seen.add(id)
+  const key = bucketKey(message.model?.providerID, message.model?.id)
+  book.observe(key, stepFeatures(message.content ?? []), actual)
+}
+
 const STARTED_EVENTS = [
   "session.text.started",
   "session.reasoning.started",
   "session.tool.input.started",
 ]
 const DELTA_EVENTS = ["session.text.delta", "session.reasoning.delta", "session.tool.input.delta"]
+// 速率先验失效的事件（→ P 重置为冷启动先验）
+const RATE_RESET_EVENTS = [
+  "session.tool.called",
+  "session.tool.success",
+  "session.tool.failed",
+  "session.step.ended",
+  "session.text.started",
+  "session.reasoning.started",
+]
 // 相位切换 / 步结束：立即刷新（不能等节流）
 const PHASE_EVENTS = [
   "session.tool.called",
@@ -86,14 +155,20 @@ const PHASE_EVENTS = [
 export function createRecorder(
   host: HostLike,
   onChange: () => void,
-  opts: { now?: () => number } = {},
+  opts: { now?: () => number; book?: CoefficientBook } = {},
 ): Recorder {
   const now = opts.now ?? Date.now
+  // 系数学习按 provider/model 分桶；未注入时用进程内单例
+  const book = opts.book ?? getCoefficientBook()
+  // 已喂入学习的消息（避免重复计入同一步）
+  const learned = new Set<string>()
   const firstOutput = new Map<string, number>()
   // 每条消息的累计估算观测（滑动窗口用）
   const sampleBuckets = new Map<string, SamplePoint[]>()
   // 工具执行期的冻结值（工具开始时锁住，结束即释放）
   const freezeState = new Map<string, { ttftMs?: number; tps?: number }>()
+  // 每条消息（= 每步）一个速率滤波器：事件重置后从新值重建
+  const rateFilters = new Map<string, RateFilter>()
   let disposed = false
 
   const samplesOf = (messageID: string): SamplePoint[] => {
@@ -108,6 +183,19 @@ export function createRecorder(
       sampleBuckets.set(messageID, bucket)
     }
     return bucket
+  }
+
+  const rateFilterOf = (messageID: string): RateFilter => {
+    let filter = rateFilters.get(messageID)
+    if (!filter) {
+      if (rateFilters.size >= 64) {
+        const oldest = rateFilters.keys().next().value
+        if (oldest !== undefined) rateFilters.delete(oldest)
+      }
+      filter = createRateFilter()
+      rateFilters.set(messageID, filter)
+    }
+    return filter
   }
 
   const bump = () => {
@@ -134,6 +222,26 @@ export function createRecorder(
   }
   for (const type of DELTA_EVENTS) unsubs.push(host.data.on(type, throttled.bump))
   for (const type of PHASE_EVENTS) unsubs.push(host.data.on(type, bump))
+  // 速率跳变事件：工具相位切换、步结束/失败、执行结束。
+  // 这些时刻速率先验必然失效（工具期速率为 0、换步后速率重建），把 P 重置回
+  // 冷启动先验即可——幂等、不需要「膨胀多少」这种隐藏参数。
+  for (const type of RATE_RESET_EVENTS) {
+    unsubs.push(
+      host.data.on(type, (event: any) => {
+        const id = event?.data?.assistantMessageID
+        if (typeof id === "string") rateFilters.get(id)?.reset()
+      }),
+    )
+  }
+  // 步结束：事件自带真实 tokens，立即反哺系数学习（不必等消息列表刷新）
+  unsubs.push(
+    host.data.on("session.step.ended", (event: any) => {
+      const sid = event?.data?.sessionID
+      if (typeof sid !== "string") return
+      const messages = (host.data.session.message.list(sid) ?? []) as PerfMessage[]
+      learnFromStepEnded(book, messages, learned, event)
+    }),
+  )
 
   // busy 心跳：仅 running 时存在，空闲零 interval
   let ticker: ReturnType<typeof setInterval> | undefined
@@ -153,6 +261,8 @@ export function createRecorder(
       if (host.data.session.status(sessionID) !== "running") return undefined
 
       const messages = (host.data.session.message.list(sessionID) ?? []) as PerfMessage[]
+      // 已结束的步用真实 token 反哺系数学习（幂等，按 messageID 去重）
+      learnFromCompleted(book, messages, learned)
       const last = messages[messages.length - 1]
       if (!last || last.type !== "assistant") return undefined
       if (last.error) return undefined
@@ -169,6 +279,8 @@ export function createRecorder(
 
       const at = now()
       const parts = last.content ?? []
+      // 本步所属的系数桶：不同供应商的分词器不同，系数不可混用
+      const coef = book.coefficient(bucketKey(last.model?.providerID, last.model?.id))
       const tool = runningTool(parts)
 
       // 工具执行中：分子分母同时停摆，直接返回「进入工具前一刻」的实时值。
@@ -187,7 +299,7 @@ export function createRecorder(
 
       // 累计估算样本：滑动窗口靠它算「窗口内增量」。工具执行期不采样，
       // 否则参数累积会把工具后的窗口拉偏。
-      const tok = estimateParts(parts)
+      const tok = estimateParts(parts, coef)
       const samples = samplesOf(messageID)
       if (samples.length === 0 || at > samples[samples.length - 1].at) {
         samples.push({ at, tok })
@@ -195,10 +307,22 @@ export function createRecorder(
         while (samples.length > 2 && samples[1].at <= at - LIVE_WINDOW_MS) samples.shift()
       }
 
+      // 卡尔曼速率：观测 = 累计估算 token；步内连续采样给速率估计。
+      // 速率跳变由事件驱动重置处理（见下），不在这里判相位。
+      const rf = rateFilterOf(messageID)
+      const rateEst = rf.update({ at, tok })
+      // 漏检事件安全网：新息持续偏置 → 速率先验作废，重来。
+      // 检测当帧的估计是「按旧模型算出来的」，必然还停在错值上（实测拥堵瞬间可差
+      // 数百个百分点），因此该帧不采用它，交给窗口口径兜底。
+      const drifted = rf.driftDetected()
+      if (drifted) rf.reset()
+
       const result = computeLivePerf(last, firstStart, at, {
         ttftMs: previousPerf(messages, last.id)?.ttftMs,
         tps: previousPerf(messages, last.id)?.tps,
         samples,
+        coefficient: coef,
+        rate: !drifted && rateEst.rate > 0 ? rateEst.rate : undefined,
       })
 
       // 缓存当前步的实时值，供下一次工具执行时冻结
@@ -228,6 +352,9 @@ export function createRecorder(
       for (const unsub of unsubs) unsub()
       unsubs.length = 0
       firstOutput.clear()
+      learned.clear()
+      rateFilters.clear()
+      freezeState.clear()
     },
   }
 }
