@@ -4,9 +4,13 @@
 // 无 solid / UI / 宿主依赖，可直接单测。
 import type { PerfMessage, PerfPart } from "./types.ts"
 
-// 精确侧守卫：短窗口与小步的比值不可信（见设计文档「守卫」）
+// 精确侧守卫（口径见 docs/design-performance-footer.md「守卫」）：
+//  - 跨度下限：首 token → 最后一批 token（time.streamed）不足 200ms，说明观测不到持续的 token 流，
+//    整块到达/合包时跨度会塌到 0–10ms，此时 tokens / 时间没有意义（DSH #7960/#9408 同类现象）。
+//  - 窗口下限：净生成窗口过短的步不出速度。
+// 不设速度上限：token 持续到达时多快都按真实值显示（上限会误杀真正快的长窗口步）。
 const MIN_GEN_MS = 300
-const BUFFER_MS_PER_TOKEN = 1.0
+const MIN_STREAM_SPAN_MS = 200
 
 const num = (v: unknown): number => (typeof v === "number" && Number.isFinite(v) ? v : 0)
 
@@ -100,8 +104,13 @@ export function computePerfSample(message: PerfMessage): PerfSample | undefined 
   const genMs = Math.max(0, completed - firstStart - toolMs)
   const ttftMs = firstStart - created
 
+  // 增量跨度：只有 time.streamed（最后一批 token）才能证明“这段窗口里真的有 token 陆续到达”。
+  // 缺该字段的步无法判定，宁可不出速度也不猜。
+  const streamed = message.time?.streamed
+  const spanMs = typeof streamed === "number" && streamed > firstStart ? streamed - firstStart : undefined
+
   const tps =
-    genTok > 0 && genMs >= Math.max(MIN_GEN_MS, genTok * BUFFER_MS_PER_TOKEN)
+    spanMs !== undefined && spanMs >= MIN_STREAM_SPAN_MS && genMs >= MIN_GEN_MS
       ? (genTok / genMs) * 1000
       : undefined
 

@@ -206,7 +206,7 @@ TPS      = Σ tokens / Σ decodeMs                 // sessionStats 投影按 ste
 
 **守卫现状**：`deriveTurnMetrics` 只有 `decodeMs > 0`，`sessionStats` 投影无条件累加——这正是爆发步能污染的入口。DSH 侧建议的修复是「排除所有 run 的 `dt` 都为空且只有 1 个成员的步」或「给 decode 窗口设下限（如 <50ms 不计入）」，TTFT 不动。
 
-**对本插件的启示**：我们的精确口径形状与 dsh 同源（provider tokens / 首 token 后墙钟），同样会被「整块到达」污染；现有守卫 `genMs ≥ genTok × 1.0`（≈1000 tok/s 上限）只能拦极端值，`docs/design-performance-footer.md` §7.4 实测纯工具步最高 971 tok/s 与 dsh 的爆发步是同一现象。若将来要加固：优先「窗口下限」而不是「速度上限」，并且只在有增量样本的步上计速。
+**对本插件的启示**：我们的精确口径形状与 dsh 同源（provider tokens / 首 token 后墙钟），同样会被「整块到达」污染。2026-10-22 已按本条落地：**去掉 1000 tok/s 上限，改判「首 token → `time.streamed`（最后一批 token）跨度 ≥200ms」**——我们不用像 dsh 那样新增 last-token 时间戳（`time.streamed` 现成可用）。同日本机 796 步实测：>1000 tok/s 的 10 步全部跨度 <200ms，跨度 ≥200ms 的超速步为 0，跨度下限覆盖原上限。DSH 上游至今未合入对应修复。
 
 ## 6. 对本项目的启示（针对「工具前后速度下掉」）
 

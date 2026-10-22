@@ -24,7 +24,7 @@ import { calcCacheRate } from "../.opencode/plugins/opencode-tui-usage/model/usa
 
 const assistant = (over: Partial<PerfMessage> = {}): PerfMessage => ({
   type: "assistant",
-  time: { created: 1000, completed: 5000 },
+  time: { created: 1000, streamed: 4900, completed: 5000 },
   tokens: { output: 200, reasoning: 0 },
   content: [{ type: "reasoning", text: "x", time: { created: 1500 } }],
   ...over,
@@ -102,7 +102,7 @@ test("computePerfSample：未完成/出错/无产出 → undefined", () => {
 
 test("computePerfSample：短窗口被守卫拦下（速度缺失，首字仍有）", () => {
   const m = assistant({
-    time: { created: 1000, completed: 1200 },
+    time: { created: 1000, streamed: 1150, completed: 1200 },
     content: [{ type: "reasoning", text: "x", time: { created: 1100 } }],
     tokens: { output: 10 },
   })
@@ -111,12 +111,40 @@ test("computePerfSample：短窗口被守卫拦下（速度缺失，首字仍有
   assert.equal(s.tps, undefined)
 })
 
+test("computePerfSample：增量跨度 <200ms → 不出速度（与速度大小无关）", () => {
+  // 跨度 100ms（1500→1600），净生成 3.5s、200 tok 只有 57 tok/s —— 仍视为“观测不到持续流”
+  const m = assistant({
+    time: { created: 1000, streamed: 1600, completed: 5000 },
+    content: [{ type: "reasoning", text: "x", time: { created: 1500 } }],
+  })
+  const s = computePerfSample(m)!
+  assert.equal(s.ttftMs, 500)
+  assert.equal(s.tps, undefined)
+})
+
+test("computePerfSample：跨度够长时没有速度上限（>1000 tok/s 照常显示）", () => {
+  // 跨度 300ms、净生成 300ms、500 tok → 1666 tok/s
+  const m = assistant({
+    time: { created: 1000, streamed: 1800, completed: 1800 },
+    content: [{ type: "reasoning", text: "x", time: { created: 1500 } }],
+    tokens: { output: 500 },
+  })
+  assert.equal(Math.round(computePerfSample(m)!.tps!), 1667)
+})
+
+test("computePerfSample：缺 time.streamed → 无法判定增量，不出速度", () => {
+  const m = assistant({ time: { created: 1000, completed: 5000 } })
+  const s = computePerfSample(m)!
+  assert.equal(s.ttftMs, 500)
+  assert.equal(s.tps, undefined)
+})
+
 // ─── latestPerf ───
 test("latestPerf：首字与速度分别回溯最近有效值", () => {
   const messages: PerfMessage[] = [
-    assistant({ time: { created: 1000, completed: 5000 } }),
+    assistant({ time: { created: 1000, streamed: 4900, completed: 5000 } }),
     assistant({
-      time: { created: 6000, completed: 6200 }, // 速度被守卫拦下
+      time: { created: 6000, streamed: 6100, completed: 6200 }, // 跨度 <200ms，速度被守卫拦下
       content: [{ type: "reasoning", text: "x", time: { created: 6100 } }],
       tokens: { output: 10 },
     }),
