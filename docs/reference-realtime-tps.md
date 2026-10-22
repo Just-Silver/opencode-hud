@@ -179,6 +179,35 @@ TPS ≈ 1 / mean_time_per_output_token = (N − 1) / (last_token_ts − first_to
 
 因此：**精确口径是标准的**（tokens / decode time，扣工具）；**实时口径不是标准做法**，是为“客户端看不到隐形思考、deltas 批量下发、工具在步内执行”做的折中。若严格对齐 vLLM，应把停顿计入分母（速度会掉）；本项目选择掉值只反映“有 token 产出时的真实速率”，代价是读不到真实卡顿。
 
+## 5.5 DeepSeek Harness（dsh）自身的口径与已知误差
+
+2026-10-22 直接读 `deepseek-ai/deepseek-harness`（master）源码与 Discussions：
+
+**官方口径**（`packages/client/ui-chat/src/client/contract/turn-metrics.ts`）：
+
+```
+ttftMs   = firstTokenTime − stepStartTime
+decodeMs = completedTime − firstTokenTime        // 首 token 之后到消息落定
+tokens   = provider 上报的 usage.outputTokens
+TPS      = Σ tokens / Σ decodeMs                 // sessionStats 投影按 step 累加
+```
+
+- 首 token = 首个非空 delta chunk（工具参数也算，与 §4 一致）；`llm/retry` 不重置。
+- TTFT 单独累加，不含在 TPS 里；**运行中刻意不显示 TPS/TTFT**（`chat-view.client.spec` 有 "withholds ttft and throughput while the turn is still running"），只在轮结束后出值。
+- `StatsPills.tsx` 注释明确：**所有统计走整日志投影（durable whole-log projection）而不是窗口**，理由是"窗口是分页的且压缩会重写它"——与本插件侧边栏踩过的分页坑同源。
+
+**DSH 自己记录的误差**（仓库 Discussions，均为真实会话数据）：
+
+| 来源 | 现象 | 根因 | 实测 |
+| --- | --- | --- | --- |
+| #7960 | 吞吐出现 10^5–10^6 tok/s | step 以「整块」到达：每个 packed run 只有 1 个成员、`dt` 为空 → decode 窗口塌成 1–5ms，token 仍是几百到几千 | 同一会话显示 **1906 tok/s**，只用健康步重算 **149 tok/s**；受影响步占比 38%–93% |
+| #9408 | 面板 963–1271 tok/s，真实 85–105 | 非流式 tool-call 参数：一步 0–10ms 窗口携带几百 token（含 reasoning） | 288 步里爆发步贡献 86,410 token / 2,770ms，流式步 8,950 token / 96,250ms |
+| #5572 | 单流 170→130 tok/s 是否变慢 | 口径说明：TPS 是「首 token 后解码段」的平均墙钟；**整段缓冲会压缩跨度 → 抬高**，中途停顿 → 压低；只能观测，不能归因 | 建议固定 prompt/模型/路由跑 N 次，分别看 TTFT 与 TPS，并抓 SSE 帧间隔 |
+
+**守卫现状**：`deriveTurnMetrics` 只有 `decodeMs > 0`，`sessionStats` 投影无条件累加——这正是爆发步能污染的入口。DSH 侧建议的修复是「排除所有 run 的 `dt` 都为空且只有 1 个成员的步」或「给 decode 窗口设下限（如 <50ms 不计入）」，TTFT 不动。
+
+**对本插件的启示**：我们的精确口径形状与 dsh 同源（provider tokens / 首 token 后墙钟），同样会被「整块到达」污染；现有守卫 `genMs ≥ genTok × 1.0`（≈1000 tok/s 上限）只能拦极端值，`docs/design-performance-footer.md` §7.4 实测纯工具步最高 971 tok/s 与 dsh 的爆发步是同一现象。若将来要加固：优先「窗口下限」而不是「速度上限」，并且只在有增量样本的步上计速。
+
 ## 6. 对本项目的启示（针对「工具前后速度下掉」）
 
 高星实现里没有“工具前隐形思考 + 累计分母”这个组合，原因有两层：
