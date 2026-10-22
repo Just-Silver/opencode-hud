@@ -3,6 +3,21 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.0.1] - 2026-10-22
+
+
+### 文档
+
+- 补充 DeepSeek Harness 的 TPS 口径与已知误差
+
+### 新功能
+
+- 速度守卫改为增量跨度下限（去掉 1000 tok/s 上限）
+
+### 杂项
+
+- 更新 CHANGELOG 到 v4.0.0
+- 发布 v4.0.1
 ## [4.0.0] - 2026-10-21
 
 
