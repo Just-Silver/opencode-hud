@@ -1,75 +1,87 @@
-# 语言规则
-- 全程中文沟通与中文 `git commit`
+<!-- 职责：给在本仓库工作的 agent 的入口约束（结构、校验、插件加载/安装、UI 硬约束、数据口径、发版）；不写：各主题的完整设计推导（见文末文档地图）。 -->
 
-# 项目
-- 单 TUI 插件仓库，非 monorepo；**分发为脚本安装（发现式）**：`install.sh`/`install.ps1` 把插件整目录装到 `~/.config/opencode/plugins/opencode-tui-usage/`（`node_modules` 之外），不发布 npm registry（CI 仅 `.github/workflows/release.yml` 发版）
-- 根 `package.json` 与 no-op `server.ts` 已随「配置安装」一并移除（TUI 插件配置安装当前不可用，方法学见 `docs/config-install.md`）；插件仅含 `tui.tsx` 入口
-- 唯一插件：`.opencode/plugins/opencode-tui-usage/`（目录型插件，`Plugin.define id:"opencode-tui-usage"`），入口 `tui.tsx`（TUI 入口，薄壳，import `@opencode/plugin/tui`）+ 同目录子模块 `{model,quota,shared,view,update}/*` 视为单插件，子模块仅被入口 `import`；MVVM 四层：`model/` 数据与纯函数（可单测）、`quota/` 查询服务（fetcher+凭据）、`shared/` 纯帮助函数、`view/` UI（Sidebar=ViewModel 编排）、`update/` 更新检查与一键更新（版本常量 + GitHub Release 对比 + 执行安装脚本）
-- 布局硬约束（opencode2 ≥ beta-18721 发现器）：插件必须是 `.opencode/plugins/`（或 `plugin/`）的**直接子目录**，目录内 `tui.tsx` = TUI 入口（`index.ts`/`server.ts` = server 入口）；**不可**再嵌套（旧 `plugins/tui/opencode-tui-usage.tsx` 形态在 19425 上不被发现、不加载）；直接子 `.tsx` 文件也不会被发现（只认 `.ts`/`.js`）。
-- 入口仅 `tui.tsx`（TUI，import `@opencode/plugin/tui`）：**发现式/脚本安装只需 TUI 入口**。`server.ts`（no-op server 入口，import `@opencode/plugin`，不得触碰 `context.ui`）**仅配置安装需要**（纯 TUI-only 包会被 server 跳过 → CLI 拿不到 → `./tui` 不加载），已随配置安装移除，详见 `docs/config-install.md`
+# 语言
 
-# 分发安装
-- **面向用户：脚本安装（发现式）**。`install.sh` / `install.ps1` 取**最新 Release**（先解析 `github.com/<repo>/releases/latest` 的 302 tag，再 `git clone --depth 1 --branch <tag>`，失败回退 `archive/refs/tags/<tag>.tar.gz`；**与 TUI 一键更新取源一致，非 `main`**），整目录**原子**装到 `$XDG_CONFIG_HOME/opencode/plugins/opencode-tui-usage/`（默认 `~/.config/opencode/plugins/...`；Windows 取 `$HOME/.config`）；`uninstall.sh` / `uninstall.ps1` 删该目录并清理 ≤18707 旧布局（`plugins/tui/*`）残留。安装后重启 opencode 生效；更新 = 重跑安装脚本（或 TUI 内一键更新）
-- 脚本落在 `plugins/` **直接子目录**且在 `node_modules` 之外 → 走 OpenTUI 运行时桥接，Solid 响应式正常。**这是 TUI 插件当前唯一可用的安装方式**
-- **配置安装（`opencode.json(c)` 的 `plugins`）当前不用于本插件**：会把插件装进 `node_modules`，npm 自动安装的 peer 依赖（`solid-js`/`@opentui/*`）导致**双 Solid 运行时** → 只画首帧、不再刷新（现象：侧边栏首次为空、切一次会话才显示）。上游未修复（#33884/#39986 OPEN）；非 TUI（server）插件不受影响。完整方法学/验证判据整理在 `docs/config-install.md`
+- 全程中文沟通；`git commit` 信息用中文。
 
-# 发版
-- 版本单一事实源：`.opencode/plugins/opencode-tui-usage/update/version.ts` 的 `VERSION`（SemVer）
-- tag == VERSION（release.yml 校验，不一致即 fail 拦截）；用户更新 = 重跑安装脚本
-- **启动时自动检查更新**：`update/index.ts` 查 GitHub 最新 Release 对比本地 `VERSION`（走 `github.com/<repo>/releases/latest` 的 **302 跳转**读 `Location`，**不用 `api.github.com`**——未认证限流 60 次/小时、部分网络直接 403），落后则 `view/UpdateBanner.tsx` 在侧边栏底部显示可点击一键更新的单行提示；无 Release / 网络失败 / 本地超前 → 静默零占位（静默失败原则，见 `update/index.ts` 头注释）。**节流**：结果落盘到插件自己的「本地应用数据」目录（对齐各 OS 的 `LocalApplicationData`：Windows `%LOCALAPPDATA%\opencode-tui-usage\update-check.json`、macOS `~/Library/Application Support/...`、Linux `$XDG_DATA_HOME` 或 `~/.local/share`），成功 TTL 24h / 失败冷却 1h / 查询超时 8s，跨进程共享。**一键更新**：横幅正文可点击 → `ctx.ui.dialog.show(<UpdateDialog>)` 弹出模态弹窗（状态 available/updating/done/failed，Esc 由对话框系统处理、Enter 走 `ctx.keymap.layer`）→ `update/apply.ts` **插件内自包含更新**（`fetch` 对应版本 tag 归档 → 系统 `tar -xzf` 解压 → 校验 `tui.tsx` → 原子替换到**全局插件目录** `shared/paths.ts` 的 `globalPluginDir()` = `$XDG_CONFIG_HOME/opencode/plugins/opencode-tui-usage`；`node:child_process` 仅 spawn 本地 `tar`、超时 120s、失败展示输出尾部）。**不用官方安装脚本、不执行远程脚本**——`pwsh -Command "irm … | iex"` 会被 Windows Defender 误报 `Trojan:Win32/Commando.A!ml`（「下载即执行」启发式），实测被拦截。成功后 `markUpdated()` 清缓存使横幅消失；弹窗 done 态提供「重启」按钮 = `ctx.keymap.dispatch("app.exit")`（官方 `exit()` → `destroyRenderer` 路径，退出 opencode，非自动重启进程）；见 `view/UpdateBanner.tsx` / `view/UpdateDialog.tsx`
-- 流程：改 `VERSION` → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z` → `.github/workflows/release.yml` 自动创建 Release
+# 仓库速览
 
-# 运行与验证
-- 本地 `Bun 1.3.14`，`TUI` 依赖 `bun:sqlite` 读 `~/.local/share/opencode/opencode.db`
-- 热重载：`B/~BUN/root/chunk-*.js?mtime` 内存打包，opencode2 动态加载，新增/重命名/删除/同名覆盖均无需重启
-- 日志：TUI 插件**无 `app.log`**（client 为 HTTP 客户端；旧文档 `ctx.client.app.log` 会直接崩溃，已踩坑）。`console.*` 被 **OpenTUI 接管到应用内 console 面板**（`renderer.console`，需 keybind 打开；**不进** opencode.log，面板临时、`save-logs` 另存到 `./_console_<ts>.log`）——opencode.log 里只有**宿主插件加载器**的日志（`plugin operation started/completed/failed/stalled`，`packages/tui/src/plugin/context.tsx`）。**插件内不自建文件日志**（v3.1.0 起已移除探针模块 `shared/probe.ts`）：排查时用应用内 console 面板，或临时加 `console.*` 后看面板；额度查询失败统一 `60s` 限流不重试
-- 校验：单元测试 `node --test tests/*.test.ts`（node ≥23.6 原生 TS strip，零依赖；12 个文件：key/quota/quota-store/model/shared/command-code/opencode-go/renderers/discovery/update/update-apply/perf，全部须过）；改后打包语法检查用 esbuild：`npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --outfile=$env:TEMP\opencode\tui-bundle-check.js`（`Done in` 即通过）；`opencode` 启动侧边栏无 `sidebar.content` 崩溃即正常
-- 官方源码速查：v2 仓库 = `sst/opencode`（TS monorepo，**`opencode-ai/opencode` 已归档勿用**）；日志实现 `packages/core/src/observability/logging.ts`（`Logger.toFile(..., { flag: "a" })`，**opencode.log 无轮转/截断/清理**）；查代码用 sparse clone 绕过 GitHub code search 对超大仓库的截断：`git clone --depth 1 --filter=blob:none --sparse <url> && git -C <dir> sparse-checkout set packages/core packages/tui`
+- 单一 opencode2 TUI 插件仓库，非 monorepo。**没有根 `package.json`、lockfile 或构建步骤**；测试用 Node 内建，不要为跑测试引入依赖或打包配置。
+- 唯一插件：`.opencode/plugins/opencode-tui-usage/`，入口 `tui.tsx`（`Plugin.define id:"opencode-tui-usage"`），注册两个 slot：
+  - `sidebar.content` → `view/Sidebar.tsx`（ViewModel：信号/memo/副作用都在这里）
+  - `prompt.footer.status` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度）
+- 目录职责：`model/` = 数据与纯函数；`quota/` = 供应商发现 + 凭据 + 查询；`shared/` = 通用纯函数；`view/` = Solid UI；`update/` = 更新检查与一键更新。
+- **相对导入必须带 `.ts`/`.tsx` 后缀**：运行时由 Bun 逐文件直接 import，没有打包器做后缀解析。
 
-# 技能（`.opencode/skills/`）
+# 校验（改完必跑）
 
-- `managing-quota-providers` —— 额度供应商**新增 / 修改 / 删除**的标准流程：先搜官方 API 出处（搜不到就停下问用户）→ 先查共享渲染器清单（`view/renderers/registry.ts` 的 `RENDERER_NAMES`）再决定复用还是新建 → 未用真实响应验证前 `enabled: false` → 删除供应商不动共享层（`view/renderers/*`、`QuotaSection`、`CHANGELOG`）。**改供应商相关代码前先加载该技能。**
+- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 130 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
+- 测试按 `node:test` 写，不要用 `bun test` 代替。
+- 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
-# opencode2 版本与插件加载
-- **当前推荐版本 `0.0.0-beta-19425`（2026-09-10）已实测可加载本插件**（本文档即修复于 19425）；**`2.0.15`（2026-09-24）亦实测可加载**（发现式；配置安装曾实测生效，但因 TUI 双 Solid 缺陷已回退，见「分发安装」）
-- 19425 双层变化（相对 18707，实测）：
-  1. **包名改名**：运行时注入的插件模块由 `@opencode-ai/plugin/tui` 改为 `@opencode/plugin/tui`（**无兼容重映射**，旧名 import 直接 ResolveMessage 失败）；npm 主包同时 `@opencode-ai/cli` → `@opencode/cli`
-  2. **目录型插件布局**：发现器只扫 `plugins/`（与 `plugin/`）**直接子项**；直接子 `.ts`/`.js` = 文件插件；直接子目录 = 目录插件，入口经解析器取 `tui.tsx`（TUI）/`index.*`、`server.*`（server）。旧的嵌套 `plugins/tui/opencode-tui-usage.tsx` 形态在 19425 上**既不被服务端也不被 TUI 加载**（探针实测空日志）。直接子 `.tsx` 文件（非目录）也不被发现（文件只认 `.ts`/`.js`，实测）
-- **判据**：`opencode2 plugin list` 列出候选（目录型只看 `tui` 入口存在与否）；真实加载看 `opencode2 api --standalone --print-logs GET /api/plugin` 的 stderr `msg="loading plugin"` + `WARN failed to load plugin ... cause`；TUI 内效果直接用应用内 console 面板（探针模块已移除，见「运行与验证」）
-- **注意**：`plugin list` 读后台 **service 缓存**，改磁盘后需 `opencode2 service restart`（或等 `plugin update`）才刷新；`api --standalone` 起私有子服务可即时看真值
-- **历史（≤18707，2026-09-01 三层根因，已过时仅供参考）**：18721/18743 曾出现「发现器只认根层 direct `.ts`/`.js` + 依赖外置化（server 端 import `@opencode-ai/plugin` 走磁盘 `~/.config/opencode/node_modules/`，官方从不安装）+ 加载器 `?mtime=` file:// URL bug」；我方实证提交 #46408、#42051 同族
-- **配置安装（`opencode.json(c)` 的 `plugins`）：完整方法学、包形状、验证判据与「TUI 插件双 Solid 陷阱」已整理到 `docs/config-install.md`（面向非 TUI 插件复用；2026-09-24 定论）**。一句话：TUI 插件经配置安装会落进 `node_modules`，npm 自动安装的 peer 依赖（`solid-js`/`@opentui/*`）形成**双 Solid 运行时** → 只画首帧不刷新（现象：侧边栏首次为空、**切一次会话才显示**）→ 本插件回退脚本安装；上游 #48883（关闭为重复）/#33884/#39986（均 OPEN），非 TUI（server）插件不受影响
+```powershell
+npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --outfile=$env:TEMP\opencode\tui-bundle-check.js
+```
 
-# 关键逻辑
-- `sidebar.content` 的 `render({sessionID})` 仅跟当前展示会话，空会话 `providerID` 返回 `undefined` 不查额度、有缓存 `Map<providerID,QuotaData>` 切回瞬时显示，子代理独立 `sessionID` 不进侧边栏不触发
-- 额度按 `providerID` 分桶：`model/quota.ts` 的 `QuotaStore`（cache/at/inFlight + **subscribe 写库通知**，依赖注入可测；`load(pid, {force})` 供轮询绕过 60s 限流，Sidebar 订阅的是当前组件实例，跨 render 重建不丢刷新）；供应商**运行时自动发现**（opencode 源码确认：TUI 插件为 bun 运行时逐文件动态 import，无打包器/glob）：`quota/index.ts` 顶层 await 用 fs 扫描 + 动态 import 收集 `quota/providers/<name>.ts` 导出 `provider` 的模块，交 `quota/registry.ts` 的 `createRegistry`（纯逻辑可测）推导白名单/URL/fetcher；白名单守卫与 fetcher 分发均经 `isQuotaProvider`/`normID` 按「小写+只留 [a-z]」归一化匹配（用户写法 `opencode-go`/`opencodego`/`opencode_go` 均命中），配置/DB 查找保持原样 pid（同源天然命中）；API URL 经 `getProviderApiUrl` 归一化查找（未注册/未启用返回 `undefined`，由 `QuotaStore.load` 记 `missing api url` warn 并跳过——**无兜底**，避免静默指向错误端点；端点由各 `providers/*.ts` 自持，通用 `registry.ts` 不含任何供应商细节）；**额度展示数据驱动**：`QuotaData = { items: QuotaItem[] }`（渲染原语，无语义字段），provider 经 `ProviderRegistration.render` 从共享渲染器库（`view/renderers/`）选一个（未知/省略 → 默认 `bars`）。**新增供应商 = 只需新增 `providers/<name>.ts` 一个文件，热重载即生效**
-- 新增供应商模板（照抄 `quota/providers/opencode-go.ts`）：文件导出 `provider: {id, apiUrl, render?, enabled?, fetch}`——`id` 任意写法（白名单归一化匹配）；`apiUrl` 为供应商自持端点（如 `opencode-go.ts` 的 `QUOTA_API_URL`）；`render` = 共享渲染器名（省略/未知 → 默认 `bars`，见「UI 视觉规范/共享渲染器层」）；`fetch(apiUrl, key): Promise<QuotaData | undefined>` 返回 `QuotaData = { items: QuotaItem[] }`，`QuotaItem = { label, percent?, text?, hint? }`——`label` 供应商自定（"5h"/"周"/"余额"/"积分"…）、`percent` 0-100（有 → 进度条 + 百分比）、`text` 无 percent 时的值文本（"$12.34"/"不限"）、`hint` 行尾注记（如 `fmtResetHint(resetsAt)` → `"↻ 周一"`），**契约只放渲染原语、语义全由 provider 决定**，空数组/undefined → 额度区块不显示；`key` 由调用方经 `resolveProviderKey(id)` 注入（**仅用于 Authorization 头，不落盘不上报**）；`enabled` 默认 true，`enabled: false` = 已实现待验不激活（跳过白名单，新供应商验证期间可用）
-- 功能开关一览：供应商级 `enabled: false` 跳过白名单（新供应商待验期间用）；`TUI_USAGE_PROBE` 已随探针模块移除（v3.1.0）
-- Command Code 已启用（`quota/providers/command-code.ts`：`mapCommandCode` 纯函数 + `fetchCommandCode` 双 API，`enabled: true`）；测试 `tests/command-code.test.ts` 离线覆盖转换逻辑
-- 外部参考项目分析：`docs/reference-opencode-cache-and-tps.md`（同类插件 `doorlockdoor/opencode-cache-and-tps` 的 TTFT/TPS 口径、常驻运行时+命令层、事件节流、v2 适配、credential 查询差异与建议落地顺序）
-- Token 口径与对账：`docs/token-accounting.md`（侧边栏累计用量取 `SessionInfo.tokens`（宿主聚合列），**不可**用 `data.session.message.list()` 求和——宿主分页加载，未滚动历史不在其中；「总量」含缓存读取、会话全生命周期累计、不含子会话；与 `session_v2`/`session_message` 的核对方法）
-- 子代理区块设计：`docs/design-subagent-section.md`（`session.family()` 取数、耗时口径 `time.idle` 的坑、34 列布局、不做持久化）
-- 性能指标设计：`docs/design-performance-footer.md`（首字/速度口径、`prompt.footer.status` 落点与两档宽度；**不含延迟**）。**v4.0.0 起只有精确值**：每个 assistant 步结束（宿主把 `tokens`/`time.completed` 写回内存投影）即刷新一次，生成中沿用上一步的值；**无实时估算、无滑窗、无卡尔曼、无在线学习系数**（`live/`、`calibration.ts`、`prior.ts`、`rate.ts`、`throttle.ts` 已删除，纯内存、不读 DB）。§7 保留历史偏差来源与失败尝试的记录，改速度相关代码前先读
-- 外部实时 TPS 实现对照：`docs/reference-realtime-tps.md`（GitHub 高星 TPS 插件的窗口/空档裁切/chunk 区间计权/陈旧隐藏/首字口径对比）——**历史调研，本项目已不实现实时值**
-- 凭据解析统一在 `quota/key.ts`：`resolveProviderKey(pid)` 顺序 keyCache → 项目配置（近→远，同目录 `.opencode/` 优先）→ 全局配置（XDG_CONFIG_HOME 优先）→ DB credential 表兜底；支持 V2 `providers.{id}.settings.apiKey` / V1 `provider.{id}.options.apiKey` 与 `{env:VAR}` 占位符，模块零日志（脱敏：key 不落盘、不上报）
-- **DB 兜底覆盖两种登录形态**（判别 = 官方 `Credential.Value` 的 `type` 字段，`packages/schema/src/credential.ts`）：`type:"key"`（`/connect` 粘贴 key，凭据归 provider 自己 = 官方 `keyProvider`）取 `key`；`type:"oauth"`（`auth login` Console device flow）取 `access`；`type:"external"` 等不处理。**Console 供应商（`opencode`/`opencode-go`）的 OAuth 凭据统一写在 `integration_id = "opencode"` 下**（官方 `consoleIntegration()`），故 DB 查询按 `credentialIntegrationIDs(pid) = [pid, consoleIntegration(pid)]` 顺序（`opencode-go` → `opencode`，`normID` 归一化兼容 `opencode_go`）。**插件只读现值、不刷新**：不碰 `refresh`/`expires`，token 过期由 opencode 自身刷新写回 DB（过期时查询失败与模型访问失败同因）
-- **auth 登录额度已实测打通（2026-10-12）**：Console 登录的 `access`（DB `type=oauth`/`method=device`）可直接调用 `https://opencode.ai/zen/go/v1/usage`（200，返回 `rolling/weekly/monthly` + `resetsAt`）；Zen 侧 `https://opencode.ai/zen/v1/usage` 为 404（按量计费无窗口端点，故 `opencode` 不入白名单）。修前 `providerID=opencode-go` 因凭据挂 `opencode` 名下而落 `missing key` → 额度不显示
-- 性能指标（首字 / 速度）：`model/perf.ts` 纯函数（`computePerfSample` 精确样本、`latestPerf` 最近有效步、`subagentTokens`/`subagentElapsedMs`），`footer.tsx`（slot 组件，memo 依赖 `session.message.list()`）→ `view/PerfFooter.tsx` 渲染到 `prompt.footer.status`（两档阈值 60；**每个 assistant 步结束刷新一次**，生成中沿用上一步的值；无实时估算/滑窗/滤波/定时器/事件订阅）。**速度守卫 = 增量跨度 `time.streamed − firstContentStart ≥ 200ms` + 净窗口 `≥ 300ms`，无速度上限**（2026-10-22 去掉 1000 tok/s 上限：整块到达测不出速率，应判「有没有持续收到 token」而不是「数值多大」）
-- 子代理区块：`view/SubagentSection.tsx`（UI）+ `model/subagent.ts`（取数与汇总纯函数，可单测）。数据全来自 `data.session.family()` 与 `SessionInfo` 聚合列（**不读子会话消息、不做持久化**）；耗时 `running ? now−created : (idle ?? updated)−created`，并用高水位钳住（步骤边界的 idle 旧值会拉回分钟数）；主行显示标题（缺失回退 agent）+ 耗时 + tokens，展开补「标题（完整，char 换行）」「模型 (强度)」「代理」「命中」四行；标题行指示灯 `● N`（黄=已停止、绿=运行中，0 也显示）与右端合计消耗、常驻「收起」按钮；运行中条目行首是 80ms 盲文点阵 spinner；缓存命中率与会话区块共用 `model/usage.ts` 的 `cacheRateOf`
+- 没有 lint / typecheck / formatter 配置；esbuild 就是编译检查。
+- 运行冒烟：在本仓库启动 opencode（`.opencode/plugins/` 会被发现），侧边栏不出现 `sidebar.content` 崩溃即基本正常；额度/性能逻辑靠应用内 console 面板观察。
 
-# UI 硬约束（Solid 响应式）
-- **组件函数体只执行一次**：禁止 `const q = props.xxx` 这类 props 快照 const——挂载后 props 更新不生效（历史 bug：QuotaSection/UsageSection/ColorBar 均踩过，额度不显示、压缩上下文后进度条不刷新皆源于此）
-- 取值必须发生在 **JSX 表达式位置**（Solid 编译器包装为响应式 getter），或惰性函数（`const pct = () => quotaPct(props.item)`）在 JSX 内调用
-- 组件文件头部已含此约束注释；新增展示组件时必须遵守
+# 插件加载与安装
 
-# UI 视觉规范（view 层，2026-10-06 定）
-- **配色固定用 opencode 默认主题色（不跟随 `ctx.theme`）**，单一事实源 `view/theme.ts`：primary `#fab283`（区块标题）/ text `#eeeeee` / muted `#808080` / 绿 `#7fd88f` / 橙 `#f5a742` / 红 `#e06c75` / 边框 `#484848` / 分隔线 `#3c3c3c` / 进度条轨道 `#1e1e1e`。色值取自 opencode 官方主题 `packages/tui/src/theme/assets/opencode.json`（defs.dark*）；进度阈值不变（<50 绿 / ≥50 橙 / ≥85 红，`pctColor(pct)` 不再收 theme 参数）。**view 层组件不再接 `theme` prop**（UpdateBanner/UsageSection/QuotaSection/Sidebar 均已移除；Sidebar 仍需 `usePlugin()` 取 `ctx.data`）
-- **面板**：整个插件（会话 + 额度 + 更新横幅）共用一个带边框盒子（`border` + `borderColor`，`paddingLeft/Right=1`、`paddingTop/Bottom=0`）。**盒子整体由 `Sidebar` 的 `hasContent()` 门控**（`usage() !== undefined || showUpdate()`）：无用量且无更新提示时**整块不渲染**，避免会话初始（尚无事件、`usage()` 为 `undefined`）出现空边框占位。更新检查状态因此上提到 `Sidebar`（ViewModel）持有，`UpdateBanner` 改为纯展示（`props.update` + `onDismiss`）——否则检查随空盒子卸载，横幅永不出现。**不用整行 `backgroundColor` 色块做分隔线**——1 行高的实心色块视觉厚重（踩过，用户否决）；分隔线一律用 `─` 字符线（`dividerLine` 常量宽 + `width="100%"`，不测量）
-- **区块**：标题行（▼/▶ + 橙金粗体标题，折叠时摘要右对齐）**自成一行**，分隔线在其**下方独立一行**（不是跟在标题文字后面、也不是同行的填充线——这是参考项目 opencode-visual-cache 的实际形态，用户明确要求）。**分隔线与内容之间不留空行**（`marginTop=0`）：1 行空隙在窄侧边栏里显得过大（用户反馈两次截图框出）
-- **列表用 `<Index>` 不用 `<For>`**：`For` 按引用比较，周期性重算产生的新对象会让整行销毁重建——实测会让用户在侧边栏选中的文字被刷新掉（会话主区域不受影响，因为它在宿主自己的节点里）。`Index` 按位置复用节点，只更新文本内容
-- **行宽测量**：子代理行与区块分隔线**都用常量/父级铺满，不做 `onSizeChange` 测量**。宿主侧边栏宽度是硬编码 `SESSION_SIDEBAR_WIDTH = 42`（`packages/tui/src/ui/layout.ts`），不可配置也不支持拖拽，测量纯属多余；而首帧测得 0、重建后才拿到真值，会让标题在「拆…」与「拆分」之间跳一次、分隔线由 1 字符撑满，表现为切换 TUI 时闪一下（踩过）
-- **数值行**：`box flexDirection="row"` = label + `flexGrow` 垫片 + 右对齐 value/share 列；数值列是纯 ASCII，用 `padStart` 定宽右对齐即可，**中文标签不需要 visualWidth**（flex 垫片自动处理）。仅摘要等含 CJK 的字符串拼接才需要 `visualWidth`（`shared/format.ts`，纯函数可单测；`dividerLine` 同）
-- **无数据区块整块不渲染**：额度供应商不在白名单（如 deepseek）时，额度区块连标题/分隔线都不显示（不给「不支持」提示——用户明确要求不显示）
-- **额度行重置时间**：由 provider 生成 `QuotaItem.hint`（`fmtResetHint(resetsAt)` → `"↻ 周一"`；本地时区：<24h `HH:MM` / <7d `周X` / 否则 `MM-DD`；缺失/非法/已过期不显示）。**bars 渲染器的 hint 列按区块内最长 hint 定宽左对齐**（`padEndVisual` 按显示列补尾空格 —— 图标如 `↻` 才会在一条竖线上；全无 hint → 不出该列）：flex 行里进度条 `flexGrow` 吸收剩余宽度，右侧列宽度不固定会让各行进度条长度漂移、列错位。`↻`(U+21BB) 属宽度歧义字符：等宽字体无半宽字形、实际占 2 列，故 `charColumns` 特判为 2 列（按 1 列算字形会被裁一半）— 加新符号/emoji 时同样要按终端实际渲染宽度核对
-- **进度条 0% 不渲染填充块**：OpenTUI 里 `flexGrow=0` 的 box 仍占最小 1 格（`minWidth={0}` 不足以归零），故 `ColorBar` 用 `Show when={clamped(pct) > 0}` 门控填充块，0% 时整条只剩轨道色
-- **共享渲染器层（`view/renderers/`）**：供应商经 `ProviderRegistration.render` 名从共享库取渲染器 —— `registry.ts`（纯逻辑可测：`DEFAULT_RENDERER` / `RENDERER_NAMES` / `resolveRendererName`，未知/省略回落默认，绝不报错）、`index.ts`（`RENDERERS` 名字→实现，`satisfies` 编译期钉住与名单一致）、`<name>.tsx`（实现，当前仅 `bars`）。`QuotaSection` 只是外壳（标题/折叠/门控 + 空条目整体不渲染），**不含任何窗口语义**。**新增一种展示形态 = 加 `view/renderers/<name>.tsx` + 在 `RENDERER_NAMES` 与 `RENDERERS` 各登记一项**（所有供应商都能 `render: "<name>"` 选用；供应商之间互不影响，老供应商零改动）
+- 发现器只认 `plugins/`（或 `plugin/`）的**直接子项**：目录型插件的 TUI 入口是 `tui.tsx`。不要再嵌套目录，也不要把 TUI 入口写成直接子 `.tsx` 文件（文件插件只认 `.ts`/`.js`）。
+- 运行时包名是 `@opencode/plugin/tui`，**不是**旧的 `@opencode-ai/plugin/tui`（无兼容重映射，改回旧名会直接加载失败）。
+- 面向用户只支持脚本安装：`install.sh` / `install.ps1` 解析最新 Release 的 302 tag，优先 `git clone --branch <tag>`，失败回退 tag 归档；整目录原子装到 `$XDG_CONFIG_HOME/opencode/plugins/opencode-tui-usage/`（Windows 取 `$HOME/.config`）。`uninstall.*` 删该目录并清理旧版 `plugins/tui/*` 残留。
+- **不要改用 `opencode.json(c)` 的 `plugins` 配置安装**：插件会落进 `node_modules`，peer 依赖带进第二份 Solid 运行时，表现为只画首帧、切一次会话才刷新。完整方法与上游 issue 见 `docs/config-install.md`。
+- 排查加载：`opencode2 plugin list` 只列候选且读 service 缓存，改盘后可能需要 `opencode2 service restart`；真实加载看 `opencode2 api --standalone --print-logs GET /api/plugin` 的 `loading plugin` / `WARN failed to load plugin`。
+- 开发时 opencode2 会热重载该插件目录（新增/重命名/删除文件通常无需重启）。
+- **TUI 插件没有 `app.log` API**（`ctx.client.app.log` 会崩）。`console.*` 进 OpenTUI 应用内 console 面板，不进 `opencode.log`；`opencode.log` 只有宿主的插件加载器日志。不要新增文件日志。
+
+# Solid / UI 硬约束
+
+- **组件函数体只执行一次**：禁止 `const x = props.x` 这类 props 快照；取值放 JSX 表达式，或用惰性 getter（`const pct = () => quotaPct(props.item)`）。额度不显示、上下文进度条不刷新都踩过这个坑。
+- 周期性重算的行列表用 `<Index>`（子代理区块）；`<For>` 按引用比较会销毁重建整行，清掉用户选中/滚动。数据只在数据源变化时更新的列表（如 `bars` 的 items）可以用 `<For>`。
+- 侧边栏宽度由宿主硬编码为 42，子代理按 34 列常量布局；**不要用 `onSizeChange` 实测**（首帧为 0，会让标题与分隔线闪一下）。分隔线用 `─` 字符线 + `width="100%"`，不要用整行 `backgroundColor`。
+- 配色只从 `view/theme.ts` 取：固定 opencode 暗色主题，不跟随 `ctx.theme`。百分比阈值：<50 绿 / ≥50 橙 / ≥85 红。
+- 整个插件的边框盒子由 `Sidebar` 的 `hasContent()` 门控（用量 / 子代理 / 更新提示全无时整块不渲染）。更新检查状态必须留在 `Sidebar`，否则横幅会随空盒子卸载。
+- 无数据区块整块不渲染（额度为空、供应商不支持、无子代理），不要显示“不支持/无数据”占位。
+- 进度条 0% 不渲染填充块：OpenTUI 里 `flexGrow=0` 的 box 仍占 1 格，`ColorBar` 用 `Show when={pct > 0}` 门控。
+- 含 CJK/符号的拼接才用 `visualWidth`；`↻`(U+21BB) 实测占 2 列，`charColumns` 已特判。新增符号/emoji 要按终端实际渲染宽度核对。
+- 额度渲染器在 `view/renderers/`：新增展示形态要加 `<name>.tsx`，并在 `registry.ts` 的 `RENDERER_NAMES` 与 `index.ts` 的 `RENDERERS` 各登记一项。不要把单个供应商的专属逻辑塞进 `QuotaSection` 或 `bars`。
+
+# 额度（quota/）
+
+- **增删改供应商前先加载 `.opencode/skills/managing-quota-providers/SKILL.md`**。
+- 供应商是运行时自动发现：`quota/index.ts` 顶层用 fs 扫描 `providers/*.ts` 并动态 import，导出 `provider` 即生效。**新增供应商只加一个文件，不改注册表；删除只删文件**。
+- `provider = { id, apiUrl, render?, enabled?, fetch }`；`fetch` 返回 `QuotaData = { items: [{ label, percent?, text?, hint? }] }`。契约只放渲染原语，不要加 `resetsAt` 之类语义字段。
+- 未用真实响应验证前用 `enabled: false`；展示设计（显示哪几行、标签叫什么）先与用户确认。
+- 白名单、URL、fetcher 分发均按 `normID`（小写 + 仅保留 a-z）匹配；未注册/未启用返回 `undefined`，**无兜底**。
+- 凭据统一在 `quota/key.ts`：keyCache → 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 按 `type` 取值：`key` → `key`，`oauth` → `access`；`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下。只读现值，不刷新、不落盘、不写日志。
+- `QuotaStore` 按 providerID 分桶：60s 限流、并发去重、写库后 `subscribe` 通知。Sidebar 每 60s 用 `load(pid, { force: true })` 轮询，切回会话走缓存。
+- 当前已启用：`opencode-go`（`/zen/go/v1/usage`）与 `command-code`（credits + subscriptions 双 API）。Zen 侧 `/zen/v1/usage` 为 404，所以 `opencode` 不接额度。
+
+# 数据口径（别自己发明）
+
+- 会话累计 token 取 `SessionInfo.tokens`（`usageFromTokens`）；**不能**对 `session.message.list()` 求和——宿主分页加载，未滚动的历史不在列表里。上下文占用取最新 assistant 消息的 token 和。
+- 性能（首字/速度）只算每个**已完成**的 assistant 步：速度守卫为 `time.streamed − firstContentStart ≥ 200ms` 且净生成 `≥ 300ms`，**无速度上限**；生成中沿用上一步的值。无实时估算、滑窗、滤波或定时器。改速度逻辑前先读 `docs/design-performance-footer.md`。
+- 子代理只读 `session.family()` 与 `SessionInfo` 聚合列，不读子会话消息、不持久化。耗时用 `(time.idle ?? time.updated) − time.created`，并用高水位钳住（步骤边界的旧 `idle` 会回跳）。缓存率与会话区块共用 `cacheRateOf`。
+
+# 更新与发版
+
+- 版本唯一来源：`update/version.ts` 的 `VERSION`（SemVer）。流程：改 `VERSION` → commit → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。
+- `.github/workflows/release.yml` 校验 tag 与 `VERSION` 一致，用 git-cliff 生成并提交 `CHANGELOG.md`，再建 Release。**不要手改 `CHANGELOG.md`**（发版时会被全量覆盖）。
+- 更新检查走 `github.com/<repo>/releases/latest` 的 302 `Location`，**不要改 `api.github.com`**（未认证限流 60 次/小时，部分网络直接 403）。节流：成功 TTL 24h / 失败冷却 1h / 超时 8s；缓存写到 `pluginDataDir()/update-check.json`。
+- 一键更新是插件自包含：fetch 对应 tag 归档 → 系统 `tar -xzf` → 校验 `tui.tsx` → 原子替换 `globalPluginDir()`。**不要改回“下载并执行安装脚本”**：`irm ... | iex` 会被 Windows Defender 判为 `Trojan:Win32/Commando.A!ml`。`child_process` 只用于本地 `tar`（120s 超时、`windowsHide`）。
+
+# 文档地图
+
+- `README.md` — 用户的安装 / 更新 / 卸载。
+- `docs/config-install.md` — 配置安装方式与 TUI 插件的双 Solid 陷阱（本插件不采用，供其他插件复用）。
+- `docs/token-accounting.md` — 会话 token 口径、数据来源与 DB 对账。
+- `docs/design-performance-footer.md` — 首字/速度口径、守卫与 footer 布局；改速度逻辑前必读。
+- `docs/design-subagent-section.md` — 子代理区块取数、耗时口径与布局。
+- `docs/reference-opencode-cache-and-tps.md` — 外部同类插件的可借鉴设计。
+- `docs/reference-realtime-tps.md` — 历史调研；实时 TPS 已在 v4.0.0 移除。
+- `docs/provider-open-design.md` — OpenDesign 额度 API 探测记录（无可用公开端点，未接入）。
+- `.opencode/skills/managing-quota-providers/SKILL.md` — 供应商新增/修改/删除流程。
+- `CHANGELOG.md` — 发版自动生成、历史冻结；`TODO.md` — 跟踪中的上游问题。
+- 新文档必须在同一次改动中登记到本节目录；代码注释只写不显然的原因/约束，来源、迁移、review 记录放 `docs/` 或本文件。
