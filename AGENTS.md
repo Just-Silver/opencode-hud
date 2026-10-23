@@ -81,7 +81,7 @@ npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platfo
 - `docs/design-subagent-section.md` — 子代理区块取数、耗时口径与布局。
 - `docs/reference-opencode-cache-and-tps.md` — 外部同类插件的可借鉴设计。
 - `docs/reference-realtime-tps.md` — 历史调研；实时 TPS 已在 v4.0.0 移除。
-- `docs/provider-open-design.md` — OpenDesign 额度 API 探测记录（无可用公开端点，未接入）。
+- `docs/provider-open-design.md` — OpenDesign 额度探测：推理 API Key 无端点；Control Key 可查 preflight + wallet（未接入）。
 - `.opencode/skills/managing-quota-providers/SKILL.md` — 供应商新增/修改/删除流程。
 - `CHANGELOG.md` — 发版自动生成、历史冻结；`TODO.md` — 跟踪中的上游问题。
 - 新文档必须在同一次改动中登记到本节目录；代码注释只写不显然的原因/约束，来源、迁移、review 记录放 `docs/` 或本文件。
