@@ -15,7 +15,7 @@
 
 # 校验（改完必跑）
 
-- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 130 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
+- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 134 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
 - 测试按 `node:test` 写，不要用 `bun test` 代替。
 - 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
