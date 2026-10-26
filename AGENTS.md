@@ -63,7 +63,7 @@ npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platfo
 
 - 会话累计 token 取 `SessionInfo.tokens`（`usageFromTokens`）；**不能**对 `session.message.list()` 求和——宿主分页加载，未滚动的历史不在列表里。上下文占用取最新 assistant 消息的 token 和。
 - 性能（首字/速度）只算每个**已完成**的 assistant 步：速度守卫为 `time.streamed − firstContentStart ≥ 200ms` 且净生成 `≥ 300ms`，**无速度上限**；生成中沿用上一步的值。无实时估算、滑窗、滤波或定时器。改速度逻辑前先读 `docs/design-performance-footer.md`。
-- 子代理只读 `session.family()` 与 `SessionInfo` 聚合列，不读子会话消息、不持久化。耗时用 `(time.idle ?? time.updated) − time.created`，并用高水位钳住（步骤边界的旧 `idle` 会回跳）。缓存率与会话区块共用 `cacheRateOf`。
+- 子代理只读 `session.family()` 与 `SessionInfo` 聚合列，不读子会话消息、不持久化。耗时用 `(time.idle ?? time.updated) − time.created`，并用高水位钳住（步骤边界的旧 `idle` 会回跳）。**排序：running 优先 → 已完成按结束时刻（`idle ?? updated ?? created`）倒序**；默认只常驻最近 5 条已完成（`VISIBLE_DONE_ROWS`），其余折叠成 `还有 N 条已完成` 一行，running 不设上限（复用的老子代理会凭状态自动回到常驻区）。缓存率与会话区块共用 `cacheRateOf`。
 
 # 更新与发版
 

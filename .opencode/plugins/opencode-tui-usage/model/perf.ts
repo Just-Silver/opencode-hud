@@ -164,3 +164,14 @@ export function subagentElapsedMs(
   if (typeof end !== "number" || end <= created) return undefined
   return end - created
 }
+
+// 子会话结束时刻（只用于「最近 N 条」排序）：idle 优先，回退 updated / created。
+// 运行中返回 undefined —— 被复用的老子代理重新 running 时不该用旧的 idle 参与已完成排序。
+export function subagentEndedAt(
+  time: { created?: number; updated?: number; idle?: number } | undefined,
+  running: boolean,
+): number | undefined {
+  if (running) return undefined
+  const end = time?.idle ?? time?.updated ?? time?.created
+  return typeof end === "number" && end > 0 ? end : undefined
+}

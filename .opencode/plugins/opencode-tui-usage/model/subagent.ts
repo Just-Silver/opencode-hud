@@ -2,7 +2,7 @@
 // 结构数据全部来自 SessionInfo 聚合列，不读子会话消息。
 // 布局与交互见 docs/design-subagent-section.md。
 import type { SubagentInfo } from "./types.ts"
-import { subagentElapsedMs, subagentTokens } from "./perf.ts"
+import { subagentElapsedMs, subagentEndedAt, subagentTokens } from "./perf.ts"
 import { cacheRateOf } from "./usage.ts"
 import { fmtTokens } from "../shared/format.ts"
 
@@ -17,6 +17,8 @@ export type SubagentRow = {
   /** 缓存命中率（%），与会话区块同一口径；无缓存数据时 undefined */
   cacheRate?: number
   elapsedMs?: number
+  /** 结束时刻（只用于排序，不展示）；运行中为 undefined */
+  endedAt?: number
   running: boolean
   expanded: boolean
 }
@@ -41,6 +43,7 @@ export function buildRow(
     tokens: subagentTokens(info.tokens),
     cacheRate: subagentCacheRate(info.tokens),
     elapsedMs: clampElapsed(opts.prevElapsed, subagentElapsedMs(info.time, opts.running, opts.now)),
+    endedAt: subagentEndedAt(info.time, opts.running),
     running: opts.running,
     expanded: opts.expanded,
   }
@@ -88,15 +91,45 @@ export function totalTokensText(rows: readonly SubagentRow[]): string | undefine
   return total > 0 ? fmtTokens(total) : undefined
 }
 
-// 排序：运行中优先，其余按耗时倒序（长的在上面，更可能是刚跑完的主线）。
-// 同耗时用 id 兜底，避免每秒重算时等价行互换位置（会让列表闪动）。
+// 排序：运行中优先（组内按耗时倒序），已完成按**结束时刻**倒序（最近完成的在最上）。
+// 为什么不用耗时倒序：耗时倒序会把 58m 的老任务压在刚跑完的 2m 之上，「最近 N 条」
+// 的筛选与展示会自相矛盾。同值用 id 兜底，避免每秒重算时等价行互换位置（会让列表闪动）。
 export function sortRows(rows: SubagentRow[]): SubagentRow[] {
   return [...rows].sort((a, b) => {
     if (a.running !== b.running) return a.running ? -1 : 1
-    const diff = (b.elapsedMs ?? 0) - (a.elapsedMs ?? 0)
+    const diff = a.running
+      ? (b.elapsedMs ?? 0) - (a.elapsedMs ?? 0)
+      : (b.endedAt ?? 0) - (a.endedAt ?? 0)
     if (diff !== 0) return diff
     return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
   })
+}
+
+// 常驻区最多保留的已完成条数（运行中的条目不设上限）。
+// 5 覆盖「一次并发 3~5 个」的常见批量，且不会把上方的用量区块挤出视野。
+export const VISIBLE_DONE_ROWS = 5
+
+// 切成常驻段与折叠段：head = 全部运行中 + 最近 keepDone 条已完成，tail = 其余已完成。
+// 输入须已 sortRows。被复用的老子代理重新 running 时凭状态自动回到 head，
+// 与它多老无关；再次结束后 idle 被刷新，于是成为「最近完成」的头部。
+export function visibleRows(
+  rows: readonly SubagentRow[],
+  keepDone: number = VISIBLE_DONE_ROWS,
+): { head: SubagentRow[]; tail: SubagentRow[] } {
+  let budget = Math.max(0, keepDone)
+  const head: SubagentRow[] = []
+  const tail: SubagentRow[] = []
+  for (const row of rows) {
+    if (row.running) {
+      head.push(row)
+    } else if (budget > 0) {
+      budget--
+      head.push(row)
+    } else {
+      tail.push(row)
+    }
+  }
+  return { head, tail }
 }
 
 // ── 运行中条目的 spinner ──

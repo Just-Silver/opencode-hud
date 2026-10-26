@@ -7,6 +7,7 @@ import {
   latestPerf,
   mergedIntervalMs,
   subagentElapsedMs,
+  subagentEndedAt,
   subagentTokens,
   toolIntervals,
 } from "../.opencode/plugins/opencode-tui-usage/model/perf.ts"
@@ -14,10 +15,12 @@ import type { PerfMessage } from "../.opencode/plugins/opencode-tui-usage/model/
 import {
   clampElapsed,
   SPINNER_FRAMES,
+  sortRows,
   statusGlyph,
   statusLights,
   subagentCacheRate,
   totalTokensText,
+  visibleRows,
   type SubagentRow,
 } from "../.opencode/plugins/opencode-tui-usage/model/subagent.ts"
 import { calcCacheRate } from "../.opencode/plugins/opencode-tui-usage/model/usage.ts"
@@ -234,4 +237,65 @@ test("statusGlyph：运行中按帧旋转，停止时固定为状态点", () => 
   assert.equal(statusGlyph(false, 7), "●")
   // 每帧至少占 1 列，否则会挤动标题列
   for (const f of SPINNER_FRAMES) assert.equal([...f].length, 1)
+})
+
+// ── 子代理排序与常驻裁剪 ──
+test("subagentEndedAt：结束时刻取 idle 优先，运行中不参与已完成排序", () => {
+  assert.equal(subagentEndedAt({ created: 1000, updated: 9000, idle: 6000 }, false), 6000)
+  assert.equal(subagentEndedAt({ created: 1000, updated: 9000 }, false), 9000)
+  assert.equal(subagentEndedAt({ created: 1000 }, false), 1000)
+  // 运行中被复用的老子代理：旧的 idle 不能让它混进「最近完成」
+  assert.equal(subagentEndedAt({ created: 1000, updated: 9000, idle: 6000 }, true), undefined)
+  assert.equal(subagentEndedAt(undefined, false), undefined)
+})
+
+test("sortRows：已完成按结束时刻倒序，耗时长的老任务不再压住新完成的", () => {
+  const row = (id: string, running: boolean, elapsedMs: number, endedAt?: number): SubagentRow => ({
+    id, agent: "general", tokens: 1, running, expanded: false, elapsedMs, endedAt,
+  })
+  const sorted = sortRows([
+    row("old-long", false, 3_480_000, 1000), // 58m 但很早完成
+    row("new-short", false, 120_000, 9000), // 2m 但刚完成
+    row("idle-a", true, 60_000),
+    row("idle-b", true, 300_000),
+  ])
+  assert.deepEqual(sorted.map((r) => r.id), ["idle-b", "idle-a", "new-short", "old-long"])
+})
+
+test("visibleRows：运行中不设上限，已完成只留最近 N 条", () => {
+  const row = (id: string, running: boolean, endedAt?: number): SubagentRow => ({
+    id, agent: "general", tokens: 1, running, expanded: false, endedAt,
+  })
+  const rows = sortRows([
+    row("done-1", false, 1000),
+    row("done-2", false, 6000),
+    row("done-3", false, 5000),
+    row("done-4", false, 4000),
+    row("done-5", false, 3000),
+    row("done-6", false, 2000),
+    row("run-a", true),
+    row("run-b", true),
+  ])
+  const { head, tail } = visibleRows(rows, 5)
+  // 运行中全留；已完成按结束时刻取最新的 5 条（6 条里丢掉最老的 done-1）
+  assert.deepEqual(head.map((r) => r.id), ["run-a", "run-b", "done-2", "done-3", "done-4", "done-5", "done-6"])
+  assert.deepEqual(tail.map((r) => r.id), ["done-1"])
+  // 折叠段顺序即列表续排，拼接回去与原序列一致
+  assert.deepEqual([...head, ...tail].map((r) => r.id), rows.map((r) => r.id))
+})
+
+test("visibleRows：运行中条数超过上限时也全部保留（复用的老子代理不被藏起）", () => {
+  const row = (id: string, running: boolean, endedAt?: number): SubagentRow => ({
+    id, agent: "general", tokens: 1, running, expanded: false, endedAt,
+  })
+  const rows = sortRows([
+    row("done-old", false, 1000),
+    row("done-new", false, 2000),
+    row("run-a", true),
+    row("run-b", true),
+    row("run-c", true),
+  ])
+  const { head, tail } = visibleRows(rows, 1)
+  assert.deepEqual(head.map((r) => r.id), ["run-a", "run-b", "run-c", "done-new"])
+  assert.deepEqual(tail.map((r) => r.id), ["done-old"])
 })

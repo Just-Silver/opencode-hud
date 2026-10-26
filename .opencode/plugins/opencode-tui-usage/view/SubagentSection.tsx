@@ -4,13 +4,14 @@
 //    所有取值必须发生在 JSX 表达式位置（Solid 编译器包装为响应式 getter）。
 // 布局见 docs/design-subagent-section.md：默认 1 行/条，展开补 2 行（模型 + 强度 / agent）。
 /** @jsxImportSource @opentui/solid */
-import { Index, Show, type JSX } from "solid-js"
+import { createMemo, createSignal, Index, Show, type JSX } from "solid-js"
 import {
   headingOf,
   modelLabel,
   statusGlyph,
   statusLights,
   totalTokensText,
+  visibleRows,
   type SubagentRow,
 } from "../model/subagent.ts"
 import { fmtElapsed, fmtPct, fmtTokens, truncateVisual } from "../shared/format.ts"
@@ -125,6 +126,14 @@ export function SubagentSection(props: {
 }): JSX.Element {
   const anyExpanded = () => props.rows.some((row) => row.expanded)
 
+  // 「还有 N 条已完成」折叠行的展开态：内存态，与逐条展开互不影响。
+  // 子代理多时默认只留 VISIBLE_DONE_ROWS 条已完成的，否则列表会一路把
+  // 上方的用量/额度区块挤出视野（family() 不会移除已结束的子会话，只增不减）。
+  const [showAllDone, setShowAllDone] = createSignal(false)
+  const parts = createMemo(() => visibleRows(props.rows))
+  // 「收起」两个对象一起收：只收逐条展开、留着折叠段全展开，读起来是没收干净
+  const anythingExpanded = () => anyExpanded() || showAllDone()
+
   // 无子代理 → 整块不渲染（不给「无子代理」占位）
   return (
     <Show when={props.rows.length > 0}>
@@ -138,11 +147,12 @@ export function SubagentSection(props: {
         actions={
           // 常驻：不可用时用弱化灰（与右侧合计同色），可用时提亮为正文白
           <text
-            fg={anyExpanded() ? TEXT_COLOR : MUTED_COLOR}
+            fg={anythingExpanded() ? TEXT_COLOR : MUTED_COLOR}
             onMouseDown={(event: { stopPropagation(): void }) => {
-              if (!anyExpanded()) return
+              if (!anythingExpanded()) return
               // 标题行整行是折叠开关，不拦住会连区块一起折叠
               event.stopPropagation()
+              setShowAllDone(false)
               props.onCollapseAll()
             }}
           >
@@ -154,11 +164,25 @@ export function SubagentSection(props: {
         <box flexDirection="column">
           {/* Index 按位置复用节点：For 按引用比较，每秒重算的新对象会让整行销毁重建，
               导致用户在该区块选中/滚动的文字被刷新掉 */}
-          <Index each={props.rows}>
+          <Index each={parts().head}>
             {(row) => (
               <Row row={row()} frame={props.frame} onToggle={() => props.onToggle(row().id)} />
             )}
           </Index>
+          {/* 折叠行：条数为 0 时整行不渲染 */}
+          <Show when={parts().tail.length > 0}>
+            <box flexDirection="row" height={1} onMouseDown={() => setShowAllDone((v) => !v)}>
+              <text fg={MUTED_COLOR}>{showAllDone() ? "▼ " : "▶ "}</text>
+              <text fg={MUTED_COLOR}>{`还有 ${parts().tail.length} 条已完成`}</text>
+            </box>
+            <Show when={showAllDone()}>
+              <Index each={parts().tail}>
+                {(row) => (
+                  <Row row={row()} frame={props.frame} onToggle={() => props.onToggle(row().id)} />
+                )}
+              </Index>
+            </Show>
+          </Show>
         </box>
       </Collapsible>
     </Show>
