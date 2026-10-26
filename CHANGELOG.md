@@ -3,6 +3,24 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.1.0] - 2026-10-26
+
+
+### 其他
+
+- 同步更新文档
+
+### 文档
+
+- 重写 AGENTS.md 为可扫读的 agent 指南
+
+### 新功能
+
+- 子代理区块默认只常驻最近 5 条已完成（v4.1.0）
+
+### 杂项
+
+- 更新 CHANGELOG 到 v4.0.1
 ## [4.0.1] - 2026-10-22
 
 
