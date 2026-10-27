@@ -80,6 +80,7 @@ npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platfo
 - `docs/design-performance-footer.md` — 首字/速度口径、守卫与 footer 布局；改速度逻辑前必读。
 - `docs/design-subagent-section.md` — 子代理区块取数、耗时口径与布局。
 - `docs/reference-opencode-cache-and-tps.md` — 外部同类插件的可借鉴设计。
+- `docs/reference-desktop-gui-plugins.md` — OpenCode Desktop GUI 插件（`./gui-experimental`）开发手册：构建/加载规则、窗口与主进程上下文、注册表、Ipc/存储/生命周期、排障。
 - `docs/reference-realtime-tps.md` — 历史调研；实时 TPS 已在 v4.0.0 移除。
 - `docs/provider-open-design.md` — OpenDesign 额度探测：推理 API Key 无端点；Control Key 可查 preflight + wallet（未接入）。
 - `.opencode/skills/managing-quota-providers/SKILL.md` — 供应商新增/修改/删除流程。
