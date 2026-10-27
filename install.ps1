@@ -49,7 +49,8 @@ try {
   if (Test-Command git) {
     Write-Host "→ git clone --depth 1 --branch $tag $RepoUrl"
     git clone --depth 1 --branch $tag $RepoUrl $tmp 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $tmp ".opencode\plugins\opencode-hud\tui.tsx"))) {
+    # 只判断 clone 本身；归档内容（目录名 / 入口）在下面统一解析，否则会把「旧版 Release 目录名不同」误报成 clone 失败
+    if ($LASTEXITCODE -eq 0) {
       $cloned = $true
     } else {
       Write-Warning "git clone 失败，尝试 curl 回退"
@@ -68,11 +69,22 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "curl 下载失败 (exit $LASTEXITCODE)" }
     tar -xzf $tar -C $tmp --strip-components=1 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "tar 解压失败 (exit $LASTEXITCODE)" }
-    if (-not (Test-Path (Join-Path $tmp ".opencode\plugins\opencode-hud\tui.tsx"))) { throw "解压后未找到插件入口" }
   }
 
-  $srcDir = Join-Path $tmp ".opencode\plugins\opencode-hud"
-  if (-not (Test-Path (Join-Path $srcDir "tui.tsx"))) { throw "未找到 $srcDir\tui.tsx" }
+  # 归档内的插件目录不硬编码名字：改名前的 Release（≤ v4.1.0）目录还叫 opencode-tui-usage。
+  # 硬编码新名会把「Release 早于更名」误报成 clone 失败 / 未找到入口。
+  $pluginsRoot = Join-Path $tmp ".opencode\plugins"
+  $srcDir = $null
+  if (Test-Path $pluginsRoot) {
+    $srcDir = Get-ChildItem $pluginsRoot -Directory |
+      Where-Object { Test-Path (Join-Path $_.FullName "tui.tsx") } |
+      Select-Object -First 1 -ExpandProperty FullName
+  }
+  if (-not $srcDir) { throw "归档内未找到插件入口（.opencode/plugins/*/tui.tsx），请检查 Release 内容" }
+  $srcName = Split-Path $srcDir -Leaf
+  if ($srcName -ne "opencode-hud") {
+    throw "最新 Release $tag 仍是改名前的目录（$srcName）；请等 v4.2.0 起的 Release，或从 main 手动安装"
+  }
 
   # 原子替换：整目录 Copy 到同文件系统的 STAGE，再 Move 覆盖 dest（单目录 rename 原子，优于旧版 tsx+目录两对象分步替换）
   # STAGE 若残留（上次 kill -9/断电），Copy-Item -Recurse 会嵌套复制而非覆盖，故复制前先清理

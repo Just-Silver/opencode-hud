@@ -32,7 +32,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - 运行时包名是 `@opencode/plugin/tui`，**不是**旧的 `@opencode-ai/plugin/tui`（无兼容重映射，改回旧名会直接加载失败）。
 - 面向用户只支持脚本安装：`install.sh` / `install.ps1` 解析最新 Release 的 302 tag，优先 `git clone --branch <tag>`，失败回退 tag 归档；整目录原子装到 `$XDG_CONFIG_HOME/opencode/plugins/opencode-hud/`（Windows 取 `$HOME/.config`）。`uninstall.*` 删该目录并清理旧版 `plugins/tui/*` 残留。
 - **改名迁移（`opencode-tui-usage` → `opencode-hud`）必须清理旧目录**：`plugins/opencode-tui-usage/` 与旧 stage 不删，老用户升级后旧插件仍被加载，两个实例注册同样两个 slot，侧栏与性能块重复渲染。`install.*`、`uninstall.*`、`update/apply.ts` 三处都保留这段清理；插件若正被宿主加载（Windows 锁目录），删除失败要能容错，留到卸载或下次安装再清。
-- 老用户从 v4.1.x 升级时**旧版更新器仍按旧目录名安装**，新版本会落进 `plugins/opencode-tui-usage/`；Release 说明必须要求这类用户重跑 `install.*`（装到新目录并清旧目录），否则下次启动新旧两份并存。
+- 老用户从 v4.1.x 升级时，**旧版更新器按旧子路径 `.opencode/plugins/opencode-tui-usage` 找入口，在 v4.2.0+ 的归档里必然失败**（报「归档中未找到插件入口 tui.tsx」），不会自动迁移；Release 说明必须要求这类用户重跑 `install.*`（装到新目录并清旧目录）。
 - **不要改用 `opencode.json(c)` 的 `plugins` 配置安装**：插件会落进 `node_modules`，peer 依赖带进第二份 Solid 运行时，表现为只画首帧、切一次会话才刷新。完整方法与上游 issue 见 `docs/config-install.md`。
 - 排查加载：`opencode2 plugin list` 只列候选且读 service 缓存，改盘后可能需要 `opencode2 service restart`；真实加载看 `opencode2 api --standalone --print-logs GET /api/plugin` 的 `loading plugin` / `WARN failed to load plugin`。
 - 开发时 opencode2 会热重载该插件目录（新增/重命名/删除文件通常无需重启）。

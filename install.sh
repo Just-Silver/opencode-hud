@@ -52,7 +52,8 @@ mkdir -p "$PLUGINS_DIR"
 cloned=0
 if command -v git >/dev/null 2>&1; then
   echo "→ git clone --depth 1 --branch $TAG $REPO_URL"
-  if git clone --depth 1 --branch "$TAG" "$REPO_URL" "$TMP" 2>/dev/null && [ -f "$TMP/.opencode/plugins/opencode-hud/tui.tsx" ]; then
+  # 只判断 clone 本身；归档内容（目录名 / 入口）在下面统一解析，否则会把「旧版 Release 目录名不同」误报成 clone 失败
+  if git clone --depth 1 --branch "$TAG" "$REPO_URL" "$TMP" 2>/dev/null; then
     cloned=1
   else
     printf "${YELLOW}warn: git clone 失败，尝试 curl 回退${RESET}\n" >&2
@@ -69,11 +70,20 @@ if [ "$cloned" -eq 0 ]; then
     printf "${RED}下载或解压失败${RESET}\n" >&2
     exit 1
   fi
-  [ -f "$TMP/.opencode/plugins/opencode-hud/tui.tsx" ] || { printf "${RED}解压后未找到插件入口${RESET}\n" >&2; exit 1; }
 fi
 
-SRC_DIR="$TMP/.opencode/plugins/opencode-hud"
-[ -f "$SRC_DIR/tui.tsx" ] || { printf "${RED}未找到 $SRC_DIR/tui.tsx${RESET}\n" >&2; exit 1; }
+# 归档内的插件目录不硬编码名字：改名前的 Release（≤ v4.1.0）目录还叫 opencode-tui-usage。
+# 硬编码新名会把「Release 早于更名」误报成 clone 失败 / 未找到入口。
+SRC_DIR=""
+for d in "$TMP/.opencode/plugins"/*/; do
+  if [ -f "$d/tui.tsx" ]; then SRC_DIR="${d%/}"; break; fi
+done
+[ -n "$SRC_DIR" ] || { printf "${RED}归档内未找到插件入口（.opencode/plugins/*/tui.tsx），请检查 Release 内容${RESET}\n" >&2; exit 1; }
+SRC_NAME="$(basename "$SRC_DIR")"
+if [ "$SRC_NAME" != "opencode-hud" ]; then
+  printf "${RED}最新 Release %s 仍是改名前的目录（%s）；请等 v4.2.0 起的 Release，或从 main 手动安装${RESET}\n" "$TAG" "$SRC_NAME" >&2
+  exit 1
+fi
 
 # 原子替换：整目录 cp 到同文件系统的 STAGE，再 mv 覆盖 DEST（单目录 rename 原子，优于旧版 tsx+目录两对象分步替换）
 # STAGE 若残留（上次 kill -9/断电），cp -rf 会嵌套复制而非覆盖，故复制前先清空
