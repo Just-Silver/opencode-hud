@@ -7,7 +7,7 @@ import { join } from "path"
 import {
   compareVersions,
   parseVersion,
-} from "../.opencode/plugins/opencode-tui-usage/update/version.ts"
+} from "../.opencode/plugins/opencode-hud/update/version.ts"
 import {
   resolveUpdate,
   fetchLatestTag,
@@ -18,8 +18,8 @@ import {
   checkForUpdate,
   updateCachePath,
   markUpdated,
-} from "../.opencode/plugins/opencode-tui-usage/update/index.ts"
-import type { UpdateCheckCache } from "../.opencode/plugins/opencode-tui-usage/update/index.ts"
+} from "../.opencode/plugins/opencode-hud/update/index.ts"
+import type { UpdateCheckCache } from "../.opencode/plugins/opencode-hud/update/index.ts"
 
 const H = 60 * 60 * 1000 // 1 小时（毫秒）
 
@@ -78,7 +78,7 @@ test("fetchLatestTag：302 Location → tag", async () => {
   const mock = (async () =>
     new Response(null, {
       status: 302,
-      headers: { location: "https://github.com/Just-Silver/opencode-tui-usage/releases/tag/v1.1.0" },
+      headers: { location: "https://github.com/Just-Silver/opencode-hud/releases/tag/v1.1.0" },
     })) as unknown as typeof fetch
   assert.equal(await fetchLatestTag(mock), "v1.1.0")
 })
@@ -148,7 +148,7 @@ test("readUpdateCache / writeUpdateCache：落盘往返 + 缺失/损坏静默", 
 // ─── index.ts updateCachePath（各 OS 的本地应用数据目录，不放 opencode 目录） ───
 test("updateCachePath：落在插件自己的本地应用数据目录下", () => {
   const p = updateCachePath()
-  assert.ok(p.endsWith(join("opencode-tui-usage", "update-check.json")), p)
+  assert.ok(p.endsWith(join("opencode-hud", "update-check.json")), p)
   if (process.platform === "win32") assert.ok(/AppData[\\/]Local/.test(p), p) // %LOCALAPPDATA%
 })
 

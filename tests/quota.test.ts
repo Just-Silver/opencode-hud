@@ -4,9 +4,9 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
-import { createRegistry, type ProviderRegistration } from "../.opencode/plugins/opencode-tui-usage/quota/registry.ts"
-import { QUOTA_API_URL } from "../.opencode/plugins/opencode-tui-usage/quota/providers/opencode-go.ts"
-import { resolveApiKeyFromConfig } from "../.opencode/plugins/opencode-tui-usage/quota/key.ts"
+import { createRegistry, type ProviderRegistration } from "../.opencode/plugins/opencode-hud/quota/registry.ts"
+import { QUOTA_API_URL } from "../.opencode/plugins/opencode-hud/quota/providers/opencode-go.ts"
+import { resolveApiKeyFromConfig } from "../.opencode/plugins/opencode-hud/quota/key.ts"
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures")
 const projectDir = join(fixtures, "project")

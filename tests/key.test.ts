@@ -16,7 +16,7 @@ import {
   pickCredentialToken,
   resolveApiKeyFromConfig,
   resolveProviderKey,
-} from "../.opencode/plugins/opencode-tui-usage/quota/key.ts"
+} from "../.opencode/plugins/opencode-hud/quota/key.ts"
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures")
 const projectDir = join(fixtures, "project")

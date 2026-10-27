@@ -2,7 +2,7 @@
 // 契约：QuotaData = { items: QuotaItem[] }；标签/顺序与 hint 格式化都由本 provider 决定
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mapOpencodeGo } from "../.opencode/plugins/opencode-tui-usage/quota/providers/opencode-go.ts"
+import { mapOpencodeGo } from "../.opencode/plugins/opencode-hud/quota/providers/opencode-go.ts"
 
 const inHours = (h: number) => new Date(Date.now() + h * 3600_000).toISOString()
 

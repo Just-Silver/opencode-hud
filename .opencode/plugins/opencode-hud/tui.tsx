@@ -4,7 +4,7 @@ import { Sidebar } from "./view/Sidebar.tsx"
 import { FooterPerf } from "./footer.tsx"
 
 export default Plugin.define({
-  id: "opencode-tui-usage",
+  id: "opencode-hud",
   setup(context) {
     context.ui.slot({
       append: "sidebar.content",

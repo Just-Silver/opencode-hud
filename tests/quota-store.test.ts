@@ -1,8 +1,8 @@
 // ─── model/quota.ts QuotaStore 单元测试（mock deps，零网络） ───
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { QuotaStore, type QuotaDeps } from "../.opencode/plugins/opencode-tui-usage/model/quota.ts"
-import type { QuotaData } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
+import { QuotaStore, type QuotaDeps } from "../.opencode/plugins/opencode-hud/model/quota.ts"
+import type { QuotaData } from "../.opencode/plugins/opencode-hud/model/types.ts"
 
 const okData: QuotaData = { items: [{ label: "5h", percent: 42 }] }
 

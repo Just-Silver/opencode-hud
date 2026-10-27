@@ -3,7 +3,7 @@
 > 记录「通过 `opencode.json(c)` 的 `plugins` 让 opencode 自动安装插件」的方式与踩坑，供后续**新插件复用**。
 >
 > **适用范围：非 TUI 插件（server 侧）**。
-> TUI 插件（渲染侧边栏等 Solid UI）要配置安装，**须不使用 Solid**——已验证方案见 [第 5 节](#5-tui-插件限制重要)（方案 B，另有待验的 A/D）。本仓库的 `opencode-tui-usage` 是 Solid 插件且不再改造，因此面向用户只提供脚本安装（发现式）。
+> TUI 插件（渲染侧边栏等 Solid UI）要配置安装，**须不使用 Solid**——已验证方案见 [第 5 节](#5-tui-插件限制重要)（方案 B，另有待验的 A/D）。本仓库的 `opencode-hud` 是 Solid 插件且不再改造，因此面向用户只提供脚本安装（发现式）。
 >
 > 一切结论以本机实测为准；opencode 发布版源码可能领先/落后于实测。
 
@@ -110,6 +110,6 @@ opencode 加载 TUI 插件时注册两个 Bun 插件（`packages/opencode/src/pl
 
 ## 6. 本仓库现状
 
-- `opencode-tui-usage` 是 TUI 插件，已**回退到脚本安装（发现式）**：根 `package.json`、no-op `server.ts` 及相关守护测试（`tests/package.test.ts`）已一并移除；面向用户的 README **只提供脚本安装**。
+- `opencode-hud` 是 TUI 插件，已**回退到脚本安装（发现式）**：根 `package.json`、no-op `server.ts` 及相关守护测试（`tests/package.test.ts`）已一并移除；面向用户的 README **只提供脚本安装**。
 - **决策（2026-09-24）：本项目不再评估配置安装改造。** 作为 Solid JSX 插件，要配置安装就得放弃 Solid（方案 B）或引入预编译构建（方案 A），代价与收益不匹配。本文件的知识**留存给未来新项目**——若新项目一开始就按方案 B 写 TUI，天然可配置安装。
 - 若将来上游修复（#33884/#39986）或方案 D/A 被实测验证，再按 [第 2 节](#2-包必须满足的形状) 恢复评估（本节 `package.json` 示例即所需形态）。

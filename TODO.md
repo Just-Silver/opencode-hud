@@ -10,7 +10,7 @@
   - 完整方法学（方案 A/B/D 对比、npm 包名 vs git 源的更新/弹窗差异）见 `docs/config-install.md` 第 5 节
 
 - [ ] **Windows 上「未钉版本的 git 插件」会让 opencode 弹命令窗**（opencode 侧问题，**非本插件**）
-  - 现象：`plugins` 里写**未钉版本**的 git 源（如 `Just-Silver/opencode-tui-usage`），opencode 共享服务 cold start 做插件更新检查时 spawn `git ls-remote` **未加 `CREATE_NO_WINDOW`** → Windows 弹出可见控制台窗口。删 `~/.cache/opencode/npm/...` 后重启（触发强制重装）会弹更多次（实测 3 次）。
+  - 现象：`plugins` 里写**未钉版本**的 git 源（如 `Just-Silver/opencode-hud`），opencode 共享服务 cold start 做插件更新检查时 spawn `git ls-remote` **未加 `CREATE_NO_WINDOW`** → Windows 弹出可见控制台窗口。删 `~/.cache/opencode/npm/...` 后重启（触发强制重装）会弹更多次（实测 3 次）。
   - 根因/上游 issue：<https://github.com/anomalyco/opencode/issues/50868>（OPEN；`server: unpinned plugin update check flashes visible git console window on Windows`）
   - 同类已关闭：`#42440`、`#38715`、`#31629`、`#30315`（Windows 子进程 spawn 通用闪窗）
   - 规避：

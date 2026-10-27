@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
-# opencode-tui-usage 全局安装脚本（bash）
-# 用法: curl -fsSL https://raw.githubusercontent.com/Just-Silver/opencode-tui-usage/main/install.sh | bash
+# opencode-hud 全局安装脚本（bash）
+# 用法: curl -fsSL https://raw.githubusercontent.com/Just-Silver/opencode-hud/main/install.sh | bash
 # 说明: 安装/更新到「最新 Release」版本（与 TUI 内一键更新的取源一致），非 main。
 set -euo pipefail
-REPO="Just-Silver/opencode-tui-usage"
+REPO="Just-Silver/opencode-hud"
 REPO_URL="https://github.com/$REPO.git"
 # releases/latest 是 302 跳转：读最终 URL 尾部即最新 tag（不用 api.github.com，避免限流/403）
 LATEST_URL="https://github.com/$REPO/releases/latest"
 XDG_BASE="${XDG_CONFIG_HOME:-$HOME/.config}"
 PLUGINS_DIR="$XDG_BASE/opencode/plugins"
 # opencode2 ≥ 0.0.0-beta-18721 的发现器只认 plugins/ 的直接子项，且目录型插件以 tui.tsx 为 TUI 入口：
-# 整个插件必须落在单个目录 plugins/opencode-tui-usage/（入口 tui.tsx + 子模块），不能再是嵌套的 plugins/tui/opencode-tui-usage.tsx
-DEST="$PLUGINS_DIR/opencode-tui-usage"
+# 整个插件必须落在单个目录 plugins/opencode-hud/（入口 tui.tsx + 子模块），不能再是嵌套的 plugins/tui/opencode-hud.tsx
+DEST="$PLUGINS_DIR/opencode-hud"
 TMP="$(mktemp -d)"
 # STAGE 必须与 DEST 同文件系统才原子（同目录必同 FS），放 PLUGINS_DIR 内是最简单取法；固定名+复制前先清理，异常残留也不影响下次
-STAGE="$PLUGINS_DIR/.tmp.opencode-tui-usage"
+STAGE="$PLUGINS_DIR/.tmp.opencode-hud"
 trap 'rm -rf "$TMP" "$STAGE"' EXIT
 
 # 颜色：成功绿 失败红 警告黄（非 TTY 自动禁用）
@@ -52,7 +52,7 @@ mkdir -p "$PLUGINS_DIR"
 cloned=0
 if command -v git >/dev/null 2>&1; then
   echo "→ git clone --depth 1 --branch $TAG $REPO_URL"
-  if git clone --depth 1 --branch "$TAG" "$REPO_URL" "$TMP" 2>/dev/null && [ -f "$TMP/.opencode/plugins/opencode-tui-usage/tui.tsx" ]; then
+  if git clone --depth 1 --branch "$TAG" "$REPO_URL" "$TMP" 2>/dev/null && [ -f "$TMP/.opencode/plugins/opencode-hud/tui.tsx" ]; then
     cloned=1
   else
     printf "${YELLOW}warn: git clone 失败，尝试 curl 回退${RESET}\n" >&2
@@ -69,10 +69,10 @@ if [ "$cloned" -eq 0 ]; then
     printf "${RED}下载或解压失败${RESET}\n" >&2
     exit 1
   fi
-  [ -f "$TMP/.opencode/plugins/opencode-tui-usage/tui.tsx" ] || { printf "${RED}解压后未找到插件入口${RESET}\n" >&2; exit 1; }
+  [ -f "$TMP/.opencode/plugins/opencode-hud/tui.tsx" ] || { printf "${RED}解压后未找到插件入口${RESET}\n" >&2; exit 1; }
 fi
 
-SRC_DIR="$TMP/.opencode/plugins/opencode-tui-usage"
+SRC_DIR="$TMP/.opencode/plugins/opencode-hud"
 [ -f "$SRC_DIR/tui.tsx" ] || { printf "${RED}未找到 $SRC_DIR/tui.tsx${RESET}\n" >&2; exit 1; }
 
 # 原子替换：整目录 cp 到同文件系统的 STAGE，再 mv 覆盖 DEST（单目录 rename 原子，优于旧版 tsx+目录两对象分步替换）
@@ -84,6 +84,10 @@ rm -rf "$DEST"
 mv "$STAGE" "$DEST"
 
 [ -f "$DEST/tui.tsx" ] || { printf "${RED}安装失败${RESET}\n" >&2; exit 1; }
+# 改名迁移（v4.1.x → opencode-hud）：旧目录不清会让两个插件实例同时注册同样两个 slot，侧栏重复渲染。
+for legacy in "$PLUGINS_DIR/opencode-tui-usage" "$PLUGINS_DIR/.tmp.opencode-tui-usage"; do
+  if [ -e "$legacy" ]; then rm -rf "$legacy"; printf "${GREEN}✓ 已清理旧版目录 $legacy${RESET}\n"; fi
+done
 printf "${GREEN}✓ 已安装到 $DEST/tui.tsx${RESET}\n"
 printf "${GREEN}  额度模块: $DEST/quota/${RESET}\n"
 echo ""

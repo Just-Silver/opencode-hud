@@ -22,7 +22,7 @@ jobs:
         id: version
         run: |
           TAG="${GITHUB_REF_NAME#v}"
-          IN_CODE="$(grep -oP 'VERSION = "\K[0-9]+\.[0-9]+\.[0-9]+' .opencode/plugins/opencode-tui-usage/update/version.ts)"
+          IN_CODE="$(grep -oP 'VERSION = "\K[0-9]+\.[0-9]+\.[0-9]+' .opencode/plugins/opencode-hud/update/version.ts)"
           echo "tag=$TAG"
           echo "code=$IN_CODE"
           if [ "$TAG" != "$IN_CODE" ]; then

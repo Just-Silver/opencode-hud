@@ -1,9 +1,9 @@
 #Requires -Version 7.0
-# opencode-tui-usage 全局安装脚本（PowerShell 7.6.5）
-# 用法: irm https://raw.githubusercontent.com/Just-Silver/opencode-tui-usage/main/install.ps1 | iex
+# opencode-hud 全局安装脚本（PowerShell 7.6.5）
+# 用法: irm https://raw.githubusercontent.com/Just-Silver/opencode-hud/main/install.ps1 | iex
 # 说明: 安装/更新到「最新 Release」版本（与 TUI 内一键更新的取源一致），非 main。
 $ErrorActionPreference = "Stop"
-$Repo = "Just-Silver/opencode-tui-usage"
+$Repo = "Just-Silver/opencode-hud"
 $RepoUrl = "https://github.com/$Repo.git"
 # releases/latest 是 302 跳转：读最终 URL 尾部即最新 tag（不用 api.github.com，避免限流/403）
 $LatestUrl = "https://github.com/$Repo/releases/latest"
@@ -29,12 +29,12 @@ function Resolve-LatestTag {
 }
 
 # opencode2 ≥ 0.0.0-beta-18721 的发现器只认 plugins/ 的直接子项，且目录型插件以 tui.tsx 为 TUI 入口：
-# 整个插件必须落在单个目录 plugins/opencode-tui-usage/（入口 tui.tsx + 子模块），不能再是嵌套的 plugins/tui/opencode-tui-usage.tsx
+# 整个插件必须落在单个目录 plugins/opencode-hud/（入口 tui.tsx + 子模块），不能再是嵌套的 plugins/tui/opencode-hud.tsx
 $pluginsDir = Get-GlobalPluginsDir
-$dest = Join-Path $pluginsDir "opencode-tui-usage"
-$tmp = Join-Path ([IO.Path]::GetTempPath()) ("opencode-tui-usage-" + [Guid]::NewGuid().ToString("N"))
+$dest = Join-Path $pluginsDir "opencode-hud"
+$tmp = Join-Path ([IO.Path]::GetTempPath()) ("opencode-hud-" + [Guid]::NewGuid().ToString("N"))
 # STAGE 必须与 dest 同文件系统才原子（同目录必同 FS），放 pluginsDir 内是最简单取法；固定名+复制前先清理，异常残留也不影响下次
-$stage = Join-Path $pluginsDir ".tmp.opencode-tui-usage"
+$stage = Join-Path $pluginsDir ".tmp.opencode-hud"
 
 try {
   $tag = Resolve-LatestTag
@@ -49,7 +49,7 @@ try {
   if (Test-Command git) {
     Write-Host "→ git clone --depth 1 --branch $tag $RepoUrl"
     git clone --depth 1 --branch $tag $RepoUrl $tmp 2>&1 | Out-Null
-    if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $tmp ".opencode\plugins\opencode-tui-usage\tui.tsx"))) {
+    if ($LASTEXITCODE -eq 0 -and (Test-Path (Join-Path $tmp ".opencode\plugins\opencode-hud\tui.tsx"))) {
       $cloned = $true
     } else {
       Write-Warning "git clone 失败，尝试 curl 回退"
@@ -68,10 +68,10 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "curl 下载失败 (exit $LASTEXITCODE)" }
     tar -xzf $tar -C $tmp --strip-components=1 2>&1 | Out-Null
     if ($LASTEXITCODE -ne 0) { throw "tar 解压失败 (exit $LASTEXITCODE)" }
-    if (-not (Test-Path (Join-Path $tmp ".opencode\plugins\opencode-tui-usage\tui.tsx"))) { throw "解压后未找到插件入口" }
+    if (-not (Test-Path (Join-Path $tmp ".opencode\plugins\opencode-hud\tui.tsx"))) { throw "解压后未找到插件入口" }
   }
 
-  $srcDir = Join-Path $tmp ".opencode\plugins\opencode-tui-usage"
+  $srcDir = Join-Path $tmp ".opencode\plugins\opencode-hud"
   if (-not (Test-Path (Join-Path $srcDir "tui.tsx"))) { throw "未找到 $srcDir\tui.tsx" }
 
   # 原子替换：整目录 Copy 到同文件系统的 STAGE，再 Move 覆盖 dest（单目录 rename 原子，优于旧版 tsx+目录两对象分步替换）
@@ -83,6 +83,10 @@ try {
   Move-Item $stage $dest
 
   if (-not (Test-Path (Join-Path $dest "tui.tsx"))) { throw "安装失败：$dest\tui.tsx 不存在" }
+  # 改名迁移（v4.1.x → opencode-hud）：旧目录不清会让两个插件实例同时注册同样两个 slot，侧栏重复渲染。
+  foreach ($legacy in @((Join-Path $pluginsDir "opencode-tui-usage"), (Join-Path $pluginsDir ".tmp.opencode-tui-usage"))) {
+    if (Test-Path $legacy) { Remove-Item -Recurse -Force $legacy -ErrorAction SilentlyContinue; Write-Host "✓ 已清理旧版目录 $legacy" -ForegroundColor Green }
+  }
   Write-Host "✓ 已安装到 $dest\tui.tsx" -ForegroundColor Green
   Write-Host "  额度模块: $dest\quota\" -ForegroundColor Green
   Write-Host ""

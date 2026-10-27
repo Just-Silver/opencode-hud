@@ -1,6 +1,6 @@
 ---
 name: managing-quota-providers
-description: Use when adding, updating, or removing a quota provider in the opencode-tui-usage plugin — e.g. 接入某供应商的额度查询（新增 provider）、某额度 API 新增字段要显示、调整额度区块展示、删除某供应商；也用于判断"该复用共享渲染器还是新建"。
+description: Use when adding, updating, or removing a quota provider in the opencode-hud plugin — e.g. 接入某供应商的额度查询（新增 provider）、某额度 API 新增字段要显示、调整额度区块展示、删除某供应商；也用于判断"该复用共享渲染器还是新建"。
 ---
 
 # 管理额度供应商（新增 / 修改 / 删除）

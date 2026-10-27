@@ -16,7 +16,7 @@ import { dirname, join } from "path"
 import { pluginDataDir } from "../shared/paths.ts"
 import { compareVersions, VERSION } from "./version.ts"
 
-export const REPO = "Just-Silver/opencode-tui-usage"
+export const REPO = "Just-Silver/opencode-hud"
 export const RELEASES_LATEST_URL = `https://github.com/${REPO}/releases/latest`
 
 // ── 节流参数 ──
@@ -122,7 +122,7 @@ export async function fetchLatestTag(
   try {
     const res = await fetchImpl(RELEASES_LATEST_URL, {
       redirect: "manual", // 只读 302 的 Location，不下载 Release 页面
-      headers: { "User-Agent": "opencode-tui-usage" },
+      headers: { "User-Agent": "opencode-hud" },
       signal: AbortSignal.timeout(timeoutMs), // 网络挂起时 8s 后中止（按失败处理）
     })
     // manual：Location 头；个别实现落到 res.url

@@ -5,7 +5,7 @@ import {
   DEFAULT_RENDERER,
   RENDERER_NAMES,
   resolveRendererName,
-} from "../.opencode/plugins/opencode-tui-usage/view/renderers/registry.ts"
+} from "../.opencode/plugins/opencode-hud/view/renderers/registry.ts"
 
 test("resolveRendererName：已知 → 原名；未知/空/未声明 → 默认（绝不报错）", () => {
   for (const name of RENDERER_NAMES) assert.equal(resolveRendererName(name), name)

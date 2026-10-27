@@ -4,28 +4,28 @@
 //   故改为插件内自己下载归档 + 解压 + 原子替换，全程不执行任何远程脚本。
 //
 // 目标目录：固定「全局插件目录」（与安装脚本 install.sh / install.ps1 一致），
-//   $XDG_CONFIG_HOME/opencode/plugins/opencode-tui-usage（默认 ~/.config/opencode/plugins/...；Windows 取 $HOME/.config）。
+//   $XDG_CONFIG_HOME/opencode/plugins/opencode-hud（默认 ~/.config/opencode/plugins/...；Windows 取 $HOME/.config）。
 //   这样在仓库目录里冒烟时不会覆盖开发副本。
 //
 // 步骤（等价于把安装脚本走一遍，只是「取源」改为 fetch 对应版本 tag 的归档）：
 //   1. fetch https://github.com/<repo>/archive/refs/tags/v<version>.tar.gz
 //   2. 写临时文件 → 系统 tar -xzf 解压（仅 spawn 本地 tar，无远程脚本执行）
-//   3. 校验归档内 .opencode/plugins/opencode-tui-usage/tui.tsx
+//   3. 校验归档内 .opencode/plugins/opencode-hud/tui.tsx
 //   4. 复制到目标同盘 staging → rm dest → mv stage dest（原子替换）
 // 与 update/index.ts 的「静默失败」不同：这是用户主动点更新，失败必须如实回报给弹窗。
 import { execFile } from "child_process"
 import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "fs"
 import { tmpdir } from "os"
 import { dirname, join } from "path"
-import { globalPluginDir } from "../shared/paths.ts"
+import { globalPluginDir, LEGACY_PLUGIN_DIR_NAME } from "../shared/paths.ts"
 
-export const REPO = "Just-Silver/opencode-tui-usage"
+export const REPO = "Just-Silver/opencode-hud"
 export const REPO_ARCHIVE_BASE = `https://github.com/${REPO}/archive`
 export const UPDATE_RUN_TIMEOUT_MS = 120_000
 // 归档内插件所在子路径（解压剥离顶层目录后）
-export const UPDATE_PLUGIN_SUBPATH = join(".opencode", "plugins", "opencode-tui-usage")
+export const UPDATE_PLUGIN_SUBPATH = join(".opencode", "plugins", "opencode-hud")
 // 与安装脚本一致的同盘 staging 名（固定名 + 复制前先清理，异常残留不影响下次）
-export const UPDATE_STAGE_NAME = ".tmp.opencode-tui-usage"
+export const UPDATE_STAGE_NAME = ".tmp.opencode-hud"
 
 // 纯函数：归档 URL。有版本号 → 对应 tag 的归档（确定性）；无 → main
 export function archiveUrl(version?: string): string {
@@ -75,7 +75,7 @@ export const execProcess: UpdateExec = (file, args, timeoutMs) =>
 export async function fetchArchive(url: string, timeoutMs: number = UPDATE_RUN_TIMEOUT_MS): Promise<Uint8Array | undefined> {
   try {
     const res = await fetch(url, {
-      headers: { "User-Agent": "opencode-tui-usage" },
+      headers: { "User-Agent": "opencode-hud" },
       signal: AbortSignal.timeout(timeoutMs),
     })
     if (!res.ok) return undefined
@@ -96,6 +96,17 @@ export function installAtomically(srcDir: string, pluginDir: string): void {
   renameSync(stage, pluginDir)
 }
 
+// 删掉改名前的旧目录。旧插件可能正被宿主加载（Windows 会锁目录），失败留给卸载/下次安装再清。
+export function removeLegacyPluginDir(pluginDir: string): void {
+  const legacy = join(dirname(pluginDir), LEGACY_PLUGIN_DIR_NAME)
+  if (legacy === pluginDir) return
+  try {
+    rmSync(legacy, { recursive: true, force: true })
+  } catch {
+    // 忽略：目录被占用时下次安装或卸载脚本清理
+  }
+}
+
 export type ApplyUpdateDeps = {
   version?: string
   pluginDir?: string // 默认全局插件目录；测试注入
@@ -111,7 +122,7 @@ export async function applyUpdate(deps: ApplyUpdateDeps = {}): Promise<UpdateRes
   const pluginDir = deps.pluginDir ?? globalPluginDir()
   const fetchArchiveImpl = deps.fetchArchive ?? ((url: string) => fetchArchive(url, timeoutMs))
   const exec = deps.exec ?? execProcess
-  const workDir = deps.workDir ?? mkdtempSync(join(tmpdir(), "opencode-tui-usage-"))
+  const workDir = deps.workDir ?? mkdtempSync(join(tmpdir(), "opencode-hud-"))
 
   try {
     const url = archiveUrl(deps.version)
@@ -132,6 +143,7 @@ export async function applyUpdate(deps: ApplyUpdateDeps = {}): Promise<UpdateRes
     if (!existsSync(join(srcDir, "tui.tsx"))) return { ok: false, message: "归档中未找到插件入口 tui.tsx" }
 
     installAtomically(srcDir, pluginDir)
+    removeLegacyPluginDir(pluginDir)
     return { ok: true }
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : String(error) }

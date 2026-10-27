@@ -17,9 +17,9 @@ export function localAppDataDir(): string {
   return xdg ? xdg : join(homedir(), ".local", "share")
 }
 
-// 本插件专属数据目录：<localAppData>/opencode-tui-usage
+// 本插件专属数据目录：<localAppData>/opencode-hud
 export function pluginDataDir(): string {
-  return join(localAppDataDir(), "opencode-tui-usage")
+  return join(localAppDataDir(), "opencode-hud")
 }
 
 // opencode 的「全局插件目录」（与安装脚本 install.sh / install.ps1 一致）：
@@ -32,5 +32,13 @@ export function globalPluginsDir(): string {
 }
 
 export function globalPluginDir(): string {
-  return join(globalPluginsDir(), "opencode-tui-usage")
+  return join(globalPluginsDir(), "opencode-hud")
+}
+
+// 改名前的目录名（v4.1.x 及更早）：老用户升级后新旧目录会并存，两边都注册同样两个 slot，
+// 侧栏与性能块会重复渲染。安装 / 更新 / 卸载流程必须顺手清掉它。
+export const LEGACY_PLUGIN_DIR_NAME = "opencode-tui-usage"
+
+export function legacyGlobalPluginDir(): string {
+  return join(globalPluginsDir(), LEGACY_PLUGIN_DIR_NAME)
 }

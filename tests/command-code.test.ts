@@ -2,8 +2,8 @@
 // 契约：QuotaData = { items: QuotaItem[] }（标签/顺序由 provider 定义）
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { mapCommandCode } from "../.opencode/plugins/opencode-tui-usage/quota/providers/command-code.ts"
-import type { QuotaData } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
+import { mapCommandCode } from "../.opencode/plugins/opencode-hud/quota/providers/command-code.ts"
+import type { QuotaData } from "../.opencode/plugins/opencode-hud/model/types.ts"
 
 // 按标签取百分比（条目顺序由 provider 决定，断言按语义取）
 const pct = (q: QuotaData | undefined, label: string): number | undefined =>

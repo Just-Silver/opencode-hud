@@ -9,8 +9,8 @@ import {
   resolveContextLimit,
   resolveProviderID,
   usageFromTokens,
-} from "../.opencode/plugins/opencode-tui-usage/model/usage.ts"
-import type { MessageLike } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
+} from "../.opencode/plugins/opencode-hud/model/usage.ts"
+import type { MessageLike } from "../.opencode/plugins/opencode-hud/model/types.ts"
 
 // ─── usageFromTokens ───
 test("usageFromTokens：直接采用会话聚合列（含缓存读）", () => {

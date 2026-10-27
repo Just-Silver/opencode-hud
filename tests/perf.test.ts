@@ -10,8 +10,8 @@ import {
   subagentEndedAt,
   subagentTokens,
   toolIntervals,
-} from "../.opencode/plugins/opencode-tui-usage/model/perf.ts"
-import type { PerfMessage } from "../.opencode/plugins/opencode-tui-usage/model/types.ts"
+} from "../.opencode/plugins/opencode-hud/model/perf.ts"
+import type { PerfMessage } from "../.opencode/plugins/opencode-hud/model/types.ts"
 import {
   clampElapsed,
   SPINNER_FRAMES,
@@ -22,8 +22,8 @@ import {
   totalTokensText,
   visibleRows,
   type SubagentRow,
-} from "../.opencode/plugins/opencode-tui-usage/model/subagent.ts"
-import { calcCacheRate } from "../.opencode/plugins/opencode-tui-usage/model/usage.ts"
+} from "../.opencode/plugins/opencode-hud/model/subagent.ts"
+import { calcCacheRate } from "../.opencode/plugins/opencode-hud/model/usage.ts"
 
 const assistant = (over: Partial<PerfMessage> = {}): PerfMessage => ({
   type: "assistant",

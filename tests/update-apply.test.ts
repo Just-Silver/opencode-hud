@@ -12,8 +12,8 @@ import {
   UPDATE_PLUGIN_SUBPATH,
   type UpdateExec,
   type UpdateRunResult,
-} from "../.opencode/plugins/opencode-tui-usage/update/apply.ts"
-import { globalPluginDir } from "../.opencode/plugins/opencode-tui-usage/shared/paths.ts"
+} from "../.opencode/plugins/opencode-hud/update/apply.ts"
+import { globalPluginDir } from "../.opencode/plugins/opencode-hud/shared/paths.ts"
 
 const ok = (): UpdateRunResult => ({ code: 0, stdout: "", stderr: "" })
 
@@ -30,7 +30,7 @@ function fakeExtract(content: string): UpdateExec {
 
 // 造一个「已安装的」插件目录
 function makePluginDir(root: string, content: string): string {
-  const dir = join(root, "plugins", "opencode-tui-usage")
+  const dir = join(root, "plugins", "opencode-hud")
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, "tui.tsx"), content)
   return dir
@@ -40,7 +40,7 @@ function makePluginDir(root: string, content: string): string {
 test("archiveUrl：有版本号走 tag 归档，无则走 main", () => {
   assert.equal(
     archiveUrl("2.1.0"),
-    "https://github.com/Just-Silver/opencode-tui-usage/archive/refs/tags/v2.1.0.tar.gz",
+    "https://github.com/Just-Silver/opencode-hud/archive/refs/tags/v2.1.0.tar.gz",
   )
   assert.ok(archiveUrl().endsWith("/archive/main.tar.gz"), archiveUrl())
 })
@@ -69,16 +69,19 @@ test("summarizeOutput：归一化 CRLF 并丢弃空行", () => {
   assert.equal(summarizeOutput("", "a\r\n\r\nb\r\n", 1), "a\nb")
 })
 
-test("globalPluginDir：落在 $XDG_CONFIG_HOME/opencode/plugins/opencode-tui-usage", () => {
+test("globalPluginDir：落在 $XDG_CONFIG_HOME/opencode/plugins/opencode-hud", () => {
   const p = globalPluginDir()
-  assert.ok(p.endsWith(join("opencode", "plugins", "opencode-tui-usage")), p)
+  assert.ok(p.endsWith(join("opencode", "plugins", "opencode-hud")), p)
 })
 
 // ─── applyUpdate 编排 ───
-test("applyUpdate：成功 → 下载 tag 归档、解压、原子替换并清理临时目录", async () => {
+test("applyUpdate：成功 → 下载 tag 归档、解压、原子替换、清理临时目录与改名前的旧目录", async () => {
   const root = mkdtempSync(join(tmpdir(), "otu-root-"))
   const work = mkdtempSync(join(tmpdir(), "otu-work-"))
   const pluginDir = makePluginDir(root, "old")
+  const legacyDir = join(root, "plugins", "opencode-tui-usage")
+  mkdirSync(legacyDir, { recursive: true })
+  writeFileSync(join(legacyDir, "tui.tsx"), "legacy")
   let fetched = ""
   try {
     const result = await applyUpdate({
@@ -95,6 +98,7 @@ test("applyUpdate：成功 → 下载 tag 归档、解压、原子替换并清�
     assert.ok(fetched.endsWith("/archive/refs/tags/v9.9.9.tar.gz"), fetched)
     assert.equal(readFileSync(join(pluginDir, "tui.tsx"), "utf8"), "new")
     assert.equal(existsSync(work), false) // 临时目录已清理
+    assert.equal(existsSync(legacyDir), false) // 旧目录已清理，避免两个实例重复渲染
   } finally {
     rmSync(root, { recursive: true, force: true })
     rmSync(work, { recursive: true, force: true })

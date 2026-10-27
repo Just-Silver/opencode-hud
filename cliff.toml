@@ -31,7 +31,7 @@ body = """
 # 版本间链接（GitHub 标准格式）
 template = """
 {% for version in versions %}
-[{{ version.version | trim_start_matches(pat="v") }}]: https://github.com/Just-Silver/opencode-tui-usage/compare/v{{ previous.version }}...v{{ version.version }}
+[{{ version.version | trim_start_matches(pat="v") }}]: https://github.com/Just-Silver/opencode-hud/compare/v{{ previous.version }}...v{{ version.version }}
 {% endfor %}
 """
 

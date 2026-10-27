@@ -64,7 +64,7 @@ export function UpdateDialog(props: { version: string; onUpdated?: () => void })
   return (
     <box paddingLeft={2} paddingRight={2} gap={1}>
       <box flexDirection="row" justifyContent="space-between">
-        <text fg={WARN_COLOR}>⚡ 更新 opencode-tui-usage</text>
+        <text fg={WARN_COLOR}>⚡ 更新 opencode-hud</text>
         <text fg={MUTED_COLOR} onMouseUp={close} cursor="pointer">
           esc
         </text>

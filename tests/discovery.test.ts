@@ -3,9 +3,9 @@
 // 与 opencode/bun 运行时同路径），断言发现结果与 enabled 过滤。
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { isQuotaProvider, getProviderApiUrl } from "../.opencode/plugins/opencode-tui-usage/quota/index.ts"
-import { COMMANDCODE_CREDITS_URL } from "../.opencode/plugins/opencode-tui-usage/quota/providers/command-code.ts"
-import { QUOTA_API_URL } from "../.opencode/plugins/opencode-tui-usage/quota/providers/opencode-go.ts"
+import { isQuotaProvider, getProviderApiUrl } from "../.opencode/plugins/opencode-hud/quota/index.ts"
+import { COMMANDCODE_CREDITS_URL } from "../.opencode/plugins/opencode-hud/quota/providers/command-code.ts"
+import { QUOTA_API_URL } from "../.opencode/plugins/opencode-hud/quota/providers/opencode-go.ts"
 
 test("自动发现：扫描 providers/ 后 opencode-go 已注册（任意写法命中）", () => {
   assert.equal(isQuotaProvider("opencode-go"), true)

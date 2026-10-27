@@ -7,7 +7,7 @@ import type { ProviderRegistration } from "../registry.ts"
 
 export const QUOTA_API_URL = "https://opencode.ai/zen/go/v1/usage"
 
-const QUOTA_USER_AGENT = "opencode-tui-usage"
+const QUOTA_USER_AGENT = "opencode-hud"
 
 // API 窗口结构（仅取用字段；窗口语义与标签由本文件决定，契约层不认识它们）
 type UsageWindow = { status?: string; percent?: number; resetsAt?: string }

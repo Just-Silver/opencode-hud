@@ -7,7 +7,7 @@
 # 仓库速览
 
 - 单一 opencode2 TUI 插件仓库，非 monorepo。**没有根 `package.json`、lockfile 或构建步骤**；测试用 Node 内建，不要为跑测试引入依赖或打包配置。
-- 唯一插件：`.opencode/plugins/opencode-tui-usage/`，入口 `tui.tsx`（`Plugin.define id:"opencode-tui-usage"`），注册两个 slot：
+- 唯一插件：`.opencode/plugins/opencode-hud/`，入口 `tui.tsx`（`Plugin.define id:"opencode-hud"`），注册两个 slot：
   - `sidebar.content` → `view/Sidebar.tsx`（ViewModel：信号/memo/副作用都在这里）
   - `prompt.footer.status` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度）
 - 目录职责：`model/` = 数据与纯函数；`quota/` = 供应商发现 + 凭据 + 查询；`shared/` = 通用纯函数；`view/` = Solid UI；`update/` = 更新检查与一键更新。
@@ -20,7 +20,7 @@
 - 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
 ```powershell
-npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --outfile=$env:TEMP\opencode\tui-bundle-check.js
+npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=node --format=esm --jsx=automatic --jsx-import-source=@opentui/solid --external:@opencode/plugin/tui --external:@opentui/solid --external:solid-js --outfile=$env:TEMP\opencode\tui-bundle-check.js
 ```
 
 - 没有 lint / typecheck / formatter 配置；esbuild 就是编译检查。
@@ -30,7 +30,9 @@ npx --yes esbuild .opencode/plugins/opencode-tui-usage/tui.tsx --bundle --platfo
 
 - 发现器只认 `plugins/`（或 `plugin/`）的**直接子项**：目录型插件的 TUI 入口是 `tui.tsx`。不要再嵌套目录，也不要把 TUI 入口写成直接子 `.tsx` 文件（文件插件只认 `.ts`/`.js`）。
 - 运行时包名是 `@opencode/plugin/tui`，**不是**旧的 `@opencode-ai/plugin/tui`（无兼容重映射，改回旧名会直接加载失败）。
-- 面向用户只支持脚本安装：`install.sh` / `install.ps1` 解析最新 Release 的 302 tag，优先 `git clone --branch <tag>`，失败回退 tag 归档；整目录原子装到 `$XDG_CONFIG_HOME/opencode/plugins/opencode-tui-usage/`（Windows 取 `$HOME/.config`）。`uninstall.*` 删该目录并清理旧版 `plugins/tui/*` 残留。
+- 面向用户只支持脚本安装：`install.sh` / `install.ps1` 解析最新 Release 的 302 tag，优先 `git clone --branch <tag>`，失败回退 tag 归档；整目录原子装到 `$XDG_CONFIG_HOME/opencode/plugins/opencode-hud/`（Windows 取 `$HOME/.config`）。`uninstall.*` 删该目录并清理旧版 `plugins/tui/*` 残留。
+- **改名迁移（`opencode-tui-usage` → `opencode-hud`）必须清理旧目录**：`plugins/opencode-tui-usage/` 与旧 stage 不删，老用户升级后旧插件仍被加载，两个实例注册同样两个 slot，侧栏与性能块重复渲染。`install.*`、`uninstall.*`、`update/apply.ts` 三处都保留这段清理；插件若正被宿主加载（Windows 锁目录），删除失败要能容错，留到卸载或下次安装再清。
+- 老用户从 v4.1.x 升级时**旧版更新器仍按旧目录名安装**，新版本会落进 `plugins/opencode-tui-usage/`；Release 说明必须要求这类用户重跑 `install.*`（装到新目录并清旧目录），否则下次启动新旧两份并存。
 - **不要改用 `opencode.json(c)` 的 `plugins` 配置安装**：插件会落进 `node_modules`，peer 依赖带进第二份 Solid 运行时，表现为只画首帧、切一次会话才刷新。完整方法与上游 issue 见 `docs/config-install.md`。
 - 排查加载：`opencode2 plugin list` 只列候选且读 service 缓存，改盘后可能需要 `opencode2 service restart`；真实加载看 `opencode2 api --standalone --print-logs GET /api/plugin` 的 `loading plugin` / `WARN failed to load plugin`。
 - 开发时 opencode2 会热重载该插件目录（新增/重命名/删除文件通常无需重启）。
