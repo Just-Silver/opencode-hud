@@ -3,6 +3,23 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.2.0] - 2026-10-27
+
+
+### 文档
+
+- 同步 AGENTS.md 的测试用例数（134）
+- 新增 OpenCode Desktop GUI 插件开发手册
+- TODO 记录 v4.6.0 清理改名迁移保护
+
+### 杂项
+
+- 更新 CHANGELOG 到 v4.1.0
+- 发布 v4.2.0（更名 opencode-hud + 安装脚本修正）
+
+### 重构
+
+- 插件更名为 opencode-hud
 ## [4.1.0] - 2026-10-26
 
 
