@@ -22,3 +22,15 @@
     - [ ] 视需要给 README 增加「怕弹窗请钉 commit SHA」的提示
     - [ ] 上游修复后回归验证
   - 备注：本插件自身**不 spawn 任何进程**（全仓无 `child_process`/`spawn(`/`exec(` 调用，唯一命中是 `quota/key.ts` 的正则 `.exec()`）。
+
+- [ ] **改名迁移保护：v4.6.0 后清理，不再对旧版目录负责**（2026-10-28 记录，计划从 v4.1.0 起第 5 个版本执行）
+  - 背景：`opencode-tui-usage` → `opencode-hud` 后，安装 / 更新 / 卸载会顺手删旧目录 `plugins/opencode-tui-usage`，否则新旧两份插件同时注册 `sidebar.content` 与 `prompt.footer.status`，侧栏和性能块重复渲染。
+  - 触发：从 v4.1.0 起第 5 个版本（**v4.6.0**）发布后可删；届时仍停在 v4.1.x 的用户不再走自动更新，改为重跑安装脚本。
+  - 清理点（删完全仓应无 `opencode-tui-usage` 引用，历史文档除外）：
+    - `install.ps1` / `install.sh`：旧目录与 `.tmp.opencode-tui-usage` 的清理循环
+    - `uninstall.ps1` / `uninstall.sh`：旧目录、旧 stage、旧 `tui/*` 布局项
+    - `update/apply.ts`：`removeLegacyPluginDir()` 及其调用
+    - `shared/paths.ts`：`LEGACY_PLUGIN_DIR_NAME`、`legacyGlobalPluginDir()`
+    - `tests/update-apply.test.ts`：成功用例里的旧目录清理断言
+    - `AGENTS.md`：「改名迁移」与「v4.1.x 升级」两条约束
+  - 顺带：`docs/superpowers/**` 与 `CHANGELOG.md` 里的旧名是历史记录，按文档规则不回填。
