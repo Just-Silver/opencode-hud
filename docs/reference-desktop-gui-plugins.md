@@ -698,3 +698,116 @@ enabled → loading → active → (failed | disabled | reload → loading | 窗
 6. 纯 GUI 包（无 server 部件）的 id 取包名/目录名；`ctx.client` 指向桌面 app 自己的 server，正常可用，只是没有自己的 server 部件 RPC 可调。内置插件拿到的 client 则所有调用都 reject。
 7. 窗口 setup 返回 thenable 的 JS bundle 是"直接判失败"，不是等待。
 8. main 异步 cleanup 最多等 3 秒。
+
+---
+
+## 15. 实机验证（2.2.0，2026-10-28）
+
+在 Windows + `opencode2` 2.2.0 + Desktop 2.2.0 上逐条实测，供以后重启桌面端开发时直接引用。凡标 **[实测]** 的都是跑通/报错观察得到的，不是读源码推断。
+
+### 15.1 目录型插件可以同时是 server + TUI + GUI **[实测]**
+
+机制在 `packages/plugin/src/host.ts` 的 `resolve()`：
+
+```ts
+return {
+  server: entry(["server", ""]),   // 先找 server.ts/…，再找 index
+  tui:    entry(["tui"]),
+  rpc:    entry(["rpc"]),
+  gui:    [ … entry(["gui-experimental.cjs", "gui-experimental.js"]) ]
+           .find((file) => file && /\.c?js$/.test(file)),
+}
+```
+
+推论（已用临时 `XDG_CONFIG_HOME` 隔离实测）：
+
+- `~/.config/opencode/plugins/<dir>/` 里放 `index.ts`（server）+ `tui.tsx` + `gui-experimental.cjs`，三者都会被解析，watcher 同时监听三个文件。
+- **不需要**改成 npm 包安装，AGENTS.md 里「脚本装目录」的形态可以保留。
+- **不要**往插件目录写带 `name` + `exports` 的 `package.json`：`resolve()` 见到它就走包名解析（`entry()` 改用包 specifier），会绕过上面这些约定文件名。
+
+### 15.2 server 进程能 import 什么 **[实测]**
+
+在非 npm 安装的插件目录里 `import()` 的结果：
+
+| specifier | 结果 |
+| --- | --- |
+| `@opencode/plugin` | ✅ 可用（`Plugin` / `Rpc` / schema 全套） |
+| `@opencode/plugin/rpc` | ✅ 可用，导出 `Rpc` |
+| `@opencode/schema/rpc` | ❌ `Cannot find package` |
+| `effect` | ✅ 可用 |
+| `solid-js` | ❌ `Cannot find package` |
+| `@opencode/client` | ❌ `Cannot find package` |
+
+`@opencode/plugin/rpc` 只是 `export { Rpc } from "@opencode/schema/rpc"` 的一层转发，所以 server 侧写契约用 `@opencode/plugin/rpc`，**不要**用 `@opencode/schema/rpc`。而 `@opencode/plugin/rpc` 同时也在 GUI bundle 的 shared 白名单里，两侧可以用同一个 specifier。
+
+运行时能力 **[实测]**：`bun:sqlite`、`node:sqlite`、`node:fs`、`node:child_process`、`fetch` 全部可用。运行时是 Bun 1.4.4（`process.versions.node` 报 26.3.0）。
+
+从插件目录 `readdirSync` + 动态 `import()` 扫描 `.ts` 子模块成功 —— 即现有 `quota/index.ts` 的「自动发现供应商」机制能原样跑在 server 里。
+
+### 15.3 TUI 与桌面可以共用一份契约 **[源码]** + **[实测]**
+
+- `Rpc.define` 是**恒等函数**（`define(d) { return d }`），契约就是纯 JSON Schema 数据对象，可以不 import 任何包。
+- server 侧注册：`context.rpc.register(definition, handlers)`（`@opencode/plugin` 的 `RpcDomain`）。
+- TUI 侧调用：`context.client: OpenCodeClient`，用 `client.rpc(definition)`。
+- 窗口侧调用：`ctx.client` 是同一个 `OpenCodeClient`，同一个 `ctx.client.rpc(definition)`。
+
+即：**一份契约 + 一份 server 实现，TUI 与桌面窗口都只做渲染**。这比 GUI 的 `main` + `Ipc` 干净 —— `main` 只服务桌面窗口，TUI 永远拿不到，会变成两份后端。
+
+HTTP 侧对应 `POST /api/rpc/:rpcID/:method`（`packages/app/.../effect-*.js` 里的 `server.rpc` 定义），body `{ input? }`、返回 `{ output? }`。
+
+### 15.4 槽位全集与真实跨度 **[源码]**
+
+第三方插件能用的 `SlotMap` 只有 4 个（`packages/plugin/src/gui/registries.ts:658`）：
+
+| Slot | 真实位置 | 会话内 |
+| --- | --- | --- |
+| `window.bottom` | 窗口底部，**横跨全宽** | ❌ |
+| `session.header` | 会话标题行右侧 | ✅ |
+| `session.location.menu` | 项目/位置菜单内 | ✅ |
+| `session.panel.end` | 侧栏 tab 条尾部 | ✅ |
+
+**`window.bottom` 的跨度**（`packages/app/src/shell/shell.tsx:225-312`）：
+
+```jsx
+<div class="flex-col">              // 窗口根
+  <Titlebar />
+  <div class="flex-row">            // 只包住下面两个
+    <aside id="vertical-tabs-sidebar">…项目列表…</aside>
+    <main>…会话区…</main>
+  </div>
+  <PluginSlot at="window.bottom" input={{}} />   // ← 在这一层
+  <ToastRegion />
+</div>
+```
+
+它是「项目列表 + 会话区」那一行的**兄弟节点**，所以**横跨整个窗口宽度，会横穿左侧项目列表下方**，不属于任何会话。「会话内」与「窗口底部全宽状态条」在桌面端**互斥**，没有同时满足的槽位。
+
+`Panel` 的 `region` 只接受 `"side"` 一个值 —— 第三方**没有底部面板**。
+
+### 15.5 桌面端自身的额度/凭据通道 **[源码]**
+
+窗口 `ctx.client` 上有两条现成通道，能省掉自己读凭据：
+
+- **`ctx.client.usage.limits({ location? })`** → `{ location, data: UsageLimitsInfo | null }`，其中 `data.go = { rolling, weekly, monthly }`，每个是 `{ percent, limited, resetsAt }`；另有 `data.budgets[]` 与 `data.workspace.usageURL`。**正好覆盖 opencode-go 三窗口，且不需要自己拿 key。**
+- **`ctx.client.credential.list()`** → `CredentialEntry[]`，带 `value`（`type:"key"` → `.key`，`type:"oauth"` → `.access`）。command-code 这类无对应端点的供应商可以走这条拿 key 后自己 fetch。
+
+但渲染进程直连第三方 API 会撞 CORS，所以**自己 fetch 的部分要放 server 部件**（见 15.3），不要放窗口。
+
+### 15.6 窗口进程里 `node:*` / `electron` 是 inert placeholder
+
+手册 §1 已写，实测补充：`fs`、`sqlite`、`child_process`、`os`、`path` 在窗口 bundle 里读到的是 Proxy，任意属性读/调用都返回自身、`then` 恒 `undefined`。所以现有 `quota/key.ts`（`fs` + `bun:sqlite`）、`update/apply.ts`（`child_process` 调 `tar`）**一行都不能在窗口里跑**，必须留在 server。
+
+### 15.7 复现验证的方法
+
+用临时目录隔离，不动真实配置：
+
+```powershell
+$t = "$env:TEMP\oc-probe-g"
+New-Item -ItemType Directory -Force "$t\opencode\plugins\probe\providers" | Out-Null
+# 放 index.ts / gui-experimental.cjs / providers/*.ts，模块内把探测结果 writeFileSync 到 $t\result.json
+$env:XDG_CONFIG_HOME = $t
+cd $t
+opencode2 api --standalone --print-logs GET /api/plugin
+```
+
+注意两点：`GET /api/plugin` 返回的 `data` 可能是空数组（那是「插件列表」而非加载日志），要看加载情况必须加 `--print-logs` 并过滤 `loading plugin` / `failed to load`。

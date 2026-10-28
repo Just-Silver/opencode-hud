@@ -2,6 +2,20 @@
 
 ## 跟踪中
 
+- [ ] **桌面端（GUI 插件）开发已冻结**（2026-10-28 决策）
+  - 状态：**未写任何代码**，未改仓库结构。只做了调研与设计，结论全部落在 `docs/reference-desktop-gui-plugins.md` §15。
+  - 冻结原因（用户决定，非技术阻塞）：形态上的硬冲突无法两全 —— 想要「会话内 + 窗口底部全宽状态条」，但第三方可用槽位里 `window.bottom` 横跨全窗口（`shell.tsx` 里是「项目列表 + 会话区」那一行的兄弟节点），会话内只有 `session.header` / `session.panel.end`，没有底部。
+  - 已确认可行的部分（重启时可直接用）：
+    - 目录型插件可同时是 server + TUI + GUI，**不需要**改成 npm 包安装；
+    - server 部件可 import `@opencode/plugin/rpc`，`Rpc.define` 是恒等函数 → **一份契约、TUI 与桌面共用**；
+    - 桌面窗口只做渲染，`fs`/`sqlite`/`tar` 全留 server；额度可用 `ctx.client.usage.limits()` 免密钥、凭据可用 `ctx.client.credential.list()`。
+  - 重启时需要重新决策的点：
+    - 状态条位置：`ComposerPill`（会话内、胶囊形态）vs `window.bottom`（全宽、非会话内）vs 面板顶部；
+    - 面板：1 个 tab（用户已选）还是拆多个；
+    - 构建形态：根 `src/` + 根 `package.json`（仅 devDeps）+ 产物 `gui-experimental.cjs` 提交进插件目录（用户已选）；
+    - A 阶段（TUI 不动、server 与 TUI 各跑一份）还是直接 B 阶段（TUI 也走 RPC）——用户已选「A 先落地、B 紧随其后」。
+  - 未完成：spec 文档、实现计划、任何代码。
+
 - [x] **TUI 插件「配置安装」：本项目不采用，知识留存**（2026-09-24 决策）
   - 现象：经 `opencode.json(c)` 的 `plugins` 安装本插件后，侧边栏**首次为空、切一次会话才显示**（之后更新也不刷新）
   - 根因（源码级）：插件落进 `node_modules`；opencode 的 **Solid 转换器 filter 明确排除 `node_modules`**，而**运行时重写器只重写「源码文本可见」的 import** —— JSX 的 `@opentui/solid/jsx-runtime` 是 Bun 转译当刻注入的，prescan 看不见 → 命中插件自带的第二份 Solid

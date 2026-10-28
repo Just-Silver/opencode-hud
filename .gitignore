@@ -399,3 +399,6 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+
+# 视觉头脑风暴产物（本地临时，不入库）
+.superpowers/
