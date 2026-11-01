@@ -82,7 +82,7 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
     return resolveProviderID(messages(), (id) => models().find((m) => m.id === id)?.providerID)
   })
 
-  // ── 子代理（结构数据全来自 SessionInfo，不读子会话消息） ──
+  // ── 子代理（结构数据来自 SessionInfo；首字/速度仅对展开条目按需读消息） ──
   // 展开状态存组件级 Map：侧边栏重建后仍保持（内存态，重启即丢）
   const [expanded, setExpanded] = createSignal<Record<string, boolean>>({})
   const [subTick, setSubTick] = createSignal(0)

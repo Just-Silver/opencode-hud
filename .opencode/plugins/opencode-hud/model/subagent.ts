@@ -19,9 +19,9 @@ export type SubagentRow = {
   elapsedMs?: number
   /** 结束时刻（只用于排序，不展示）；运行中为 undefined */
   endedAt?: number
-  /** 该子代理最近一个已完成步的首字（ms）；无有效样本时 undefined */
+  /** 该子代理最近可算样本的首字（ms）；与底部 latestPerf 同口径，无样本时 undefined */
   ttftMs?: number
-  /** 该子代理最近一个已完成步的速度（tok/s）；无有效样本时 undefined */
+  /** 该子代理最近通过守卫的速度（tok/s）；与底部 latestPerf 同口径，无样本时 undefined */
   tps?: number
   running: boolean
   expanded: boolean

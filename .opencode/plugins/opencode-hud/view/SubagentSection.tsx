@@ -2,7 +2,7 @@
 // 配色固定取 theme.ts 调色板（opencode 主题色，不随宿主主题）。
 // ⚠️ 响应式约束：组件函数体只执行一次，禁止 props 快照 const；
 //    所有取值必须发生在 JSX 表达式位置（Solid 编译器包装为响应式 getter）。
-// 布局见 docs/design-subagent-section.md：默认 1 行/条，展开补 2 行（模型 + 强度 / agent）。
+// 布局见 docs/design-subagent-section.md：默认 1 行/条，展开补标题 / 模型 / 代理 / 命中 / 性能（最多 5 行）。
 /** @jsxImportSource @opentui/solid */
 import { createMemo, createSignal, Index, Show, type JSX } from "solid-js"
 import {
@@ -95,7 +95,7 @@ function Row(props: {
               <text fg={TEXT_COLOR}>{fmtPct(props.row.cacheRate)}</text>
             </box>
           </Show>
-          {/* 行 5：最近一个已完成步的首字 / 速度（与底部同口径）；无样本时整行不渲染 */}
+          {/* 行 5：最近有效样本的首字 / 速度（与底部同口径）；无样本时整行不渲染 */}
           <Show when={fmtPerf(props.row.ttftMs, props.row.tps)}>
             {(text) => (
               <box flexDirection="row" height={1}>

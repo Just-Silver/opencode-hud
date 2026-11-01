@@ -44,6 +44,7 @@ test("fmtTokens：千分/百万缩写", () => {
 
 test("fmtPerf：首字与速度按底部格式拼接，缺项省略", () => {
   assert.equal(fmtPerf(420, 48), "0.42s · 48 tok/s")
+  assert.equal(fmtPerf(420, 48.2), "0.42s · 48 tok/s") // fmtTps 对 ≥10 取整
   assert.equal(fmtPerf(420, undefined), "0.42s")
   assert.equal(fmtPerf(undefined, 8.4), "8.4 tok/s")
   assert.equal(fmtPerf(undefined, undefined), "")

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 展开某条子代理时，显示该子代理最近一个已完成步的首字与 token 速度，口径与底部状态行完全一致。
+**Goal:** 展开某条子代理时，显示该子代理最近有效样本的首字与 token 速度（首字与速度分别回溯），口径与底部状态行完全一致。
 
 **Architecture:** 计算复用 `model/perf.ts` 的 `latestPerf`，格式化抽到 `shared/format.ts` 的 `fmtPerf`；`Sidebar` 在展开时对子会话做一次 `message.sync` 补历史，之后靠宿主写回 Solid store 响应式更新；`SubagentSection` 只在展开区多渲染一行。
 
@@ -157,9 +157,9 @@ Expected: FAIL，`buildRow` 未导出或 `ttftMs` 不存在。
 在 `SubagentRow` 增加：
 
 ```ts
-  /** 该子代理最近一个已完成步的首字（ms）；无有效样本时 undefined */
+  /** 该子代理最近可算样本的首字（ms）；与底部 latestPerf 同口径，无样本时 undefined */
   ttftMs?: number
-  /** 该子代理最近一个已完成步的速度（tok/s）；无有效样本时 undefined */
+  /** 该子代理最近通过守卫的速度（tok/s）；与底部 latestPerf 同口径，无样本时 undefined */
   tps?: number
 ```
 
@@ -289,7 +289,7 @@ git commit -m "feat: 子代理展开时按需读取首字与速度"
 `view/SubagentSection.tsx` import 增加 `fmtPerf`（与现有 `shared/format.ts` 的导入合并）。在「命中」`<Show>` 之后加：
 
 ```tsx
-{/* 行 5：最近一个已完成步的首字 / 速度（与底部同口径）；无样本时整行不渲染 */}
+{/* 行 5：最近有效样本的首字 / 速度（与底部同口径）；无样本时整行不渲染 */}
 <Show when={fmtPerf(props.row.ttftMs, props.row.tps)}>
   {(text) => (
     <box flexDirection="row" height={1}>
@@ -307,7 +307,7 @@ git commit -m "feat: 子代理展开时按需读取首字与速度"
 - §1 数据来源表新增：
 
 ```md
-| 首字 / 速度 | 展开时 `message.sync(id)` → `message.list(id)` → `latestPerf` | 仅展开时取数；最近一个已完成步；与底部同口径 |
+| 首字 / 速度 | 展开时 `message.sync(id)` → `message.list(id)` → `latestPerf` | 仅展开时取数；首字与速度分别回溯最近有效样本；与底部同口径 |
 ```
 
 - §3 展开示例在「命中」后补：
