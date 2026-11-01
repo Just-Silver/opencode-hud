@@ -13,7 +13,8 @@ import {
   resolveProviderID,
   usageFromTokens,
 } from "../model/usage.ts"
-import type { TokenLike } from "../model/types.ts"
+import type { PerfMessage, TokenLike } from "../model/types.ts"
+import { latestPerf } from "../model/perf.ts"
 import { getQuotaStore, QUOTA_REFRESH_MS, type QuotaDeps } from "../model/quota.ts"
 import { buildRow, sortRows, SPINNER_INTERVAL_MS, type SubagentRow } from "../model/subagent.ts"
 import { SubagentSection } from "./SubagentSection.tsx"
@@ -93,6 +94,28 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
     return family.filter((id: string) => id !== sessionID)
   })
 
+  // 只对已展开的条目读子会话消息：未展开的条目不产生任何请求。
+  // 不读 subTick —— 性能只在步结束写回 store 时变，不跟 1s 耗时心跳重算。
+  const subagentPerf = createMemo<Record<string, { ttftMs?: number; tps?: number }>>(() => {
+    const state = expanded()
+    const out: Record<string, { ttftMs?: number; tps?: number }> = {}
+    for (const id of Object.keys(state)) {
+      if (state[id] !== true) continue
+      out[id] = latestPerf((ctx.data.session.message.list(id) ?? []) as PerfMessage[])
+    }
+    return out
+  })
+
+  // 展开时才补一次子会话消息（宿主只给当前会话/标签页自动同步消息）。
+  // sync.run 成功后同 key 短路；失败静默，下次重新展开再试。
+  createEffect(() => {
+    const state = expanded()
+    for (const id of Object.keys(state)) {
+      if (state[id] !== true) continue
+      void ctx.data.session.message.sync(id).catch(() => {})
+    }
+  })
+
   // 耗时高水位：跨 memo 重算保留，避免步骤边界的 idle 旧值把分钟数拉回去
   const elapsedHigh = new Map<string, number>()
 
@@ -100,6 +123,7 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
     const tick = subTick() // 运行中条目靠它刷新耗时
     const now = Date.now()
     const state = expanded()
+    const perf = subagentPerf()
     const rows = subagentIds().map((id) => {
       const info = ctx.data.session.get(id)
       if (!info) return undefined
@@ -109,6 +133,7 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
         expanded: state[id] === true,
         now,
         prevElapsed: elapsedHigh.get(id),
+        perf: perf[id],
       })
     })
     const list = rows.filter((r): r is SubagentRow => r !== undefined)
