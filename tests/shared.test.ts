@@ -1,7 +1,7 @@
 // ─── shared/ 共享帮助函数单元测试 ───
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { dividerLine, fmtPct, fmtPctInt, fmtResetHint, fmtResetTime, fmtTokens, padEndVisual, padStartVisual, quotaPct, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
+import { dividerLine, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, quotaPct, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
 import { normID } from "../.opencode/plugins/opencode-hud/shared/id.ts"
 import { parseJson } from "../.opencode/plugins/opencode-hud/shared/jsonc.ts"
 
@@ -40,6 +40,15 @@ test("fmtTokens：千分/百万缩写", () => {
   assert.equal(fmtTokens(999999), "1M")
   assert.equal(fmtTokens(Number.NaN), "")
   assert.equal(trimZero("200.0"), "200")
+})
+
+test("fmtPerf：首字与速度按底部格式拼接，缺项省略", () => {
+  assert.equal(fmtPerf(420, 48), "0.42s · 48 tok/s")
+  assert.equal(fmtPerf(420, undefined), "0.42s")
+  assert.equal(fmtPerf(undefined, 8.4), "8.4 tok/s")
+  assert.equal(fmtPerf(undefined, undefined), "")
+  assert.equal(fmtTpsText(48), "48 tok/s")
+  assert.equal(fmtTpsText(undefined), "")
 })
 
 test("fmtPct / sharePct / fmtPctInt / quotaPct", () => {

@@ -132,6 +132,17 @@ export function fmtTps(tps: number | undefined): string {
   return String(v)
 }
 
+// 速度文本：48 tok/s；无有效值返回空串（调用方据此决定是否渲染）
+export function fmtTpsText(tps: number | undefined): string {
+  const v = fmtTps(tps)
+  return v ? `${v} tok/s` : ""
+}
+
+// 首字 + 速度（底部完整档 / 子代理展开行共用）：0.42s · 48 tok/s；缺项只留存在的
+export function fmtPerf(ttftMs: number | undefined, tps: number | undefined): string {
+  return [fmtSec(ttftMs), fmtTpsText(tps)].filter(Boolean).join(" · ")
+}
+
 // 子代理耗时（短格式）：42s / 1m10s / 1h02m
 export function fmtElapsed(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return ""

@@ -6,7 +6,7 @@
 /** @jsxImportSource @opentui/solid */
 import { Show, createMemo, type JSX } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
-import { fmtSec, fmtTps } from "../shared/format.ts"
+import { fmtPerf, fmtTpsText } from "../shared/format.ts"
 import { TEXT_COLOR } from "./theme.ts"
 
 // 两档阈值：≥60 完整（时长 · 速度），<60 只留速度（60 跟随宿主 showDetails 收缩位）
@@ -28,12 +28,9 @@ export function PerfFooter(props: {
   const level = createMemo(() => levelOf(dimensions().width))
 
   // 首字时长不加「首字」标签：状态行本就窄，靠「s · tok/s」的顺序自明
-  const text = createMemo(() => {
-    const ttftText = fmtSec(props.ttftMs)
-    const tpsRaw = fmtTps(props.tps)
-    const tpsText = tpsRaw ? `${tpsRaw} tok/s` : ""
-    return level() === "full" ? [ttftText, tpsText].filter(Boolean).join(" · ") : tpsText
-  })
+  const text = createMemo(() =>
+    level() === "full" ? fmtPerf(props.ttftMs, props.tps) : fmtTpsText(props.tps),
+  )
 
   // 首页（无 sessionID）、宿主收缩（showDetails=false）、无样本 → 整段不渲染
   return (
