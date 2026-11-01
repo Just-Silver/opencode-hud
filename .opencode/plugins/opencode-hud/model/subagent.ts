@@ -19,6 +19,10 @@ export type SubagentRow = {
   elapsedMs?: number
   /** 结束时刻（只用于排序，不展示）；运行中为 undefined */
   endedAt?: number
+  /** 该子代理最近一个已完成步的首字（ms）；无有效样本时 undefined */
+  ttftMs?: number
+  /** 该子代理最近一个已完成步的速度（tok/s）；无有效样本时 undefined */
+  tps?: number
   running: boolean
   expanded: boolean
 }
@@ -32,7 +36,13 @@ export function subagentCacheRate(tokens: SubagentInfo["tokens"]): number | unde
 // 从 SessionInfo 组装一行；无 tokens 也显示（新起的子代理）
 export function buildRow(
   info: SubagentInfo,
-  opts: { running: boolean; expanded: boolean; now: number; prevElapsed?: number },
+  opts: {
+    running: boolean
+    expanded: boolean
+    now: number
+    prevElapsed?: number
+    perf?: { ttftMs?: number; tps?: number }
+  },
 ): SubagentRow {
   return {
     id: info.id,
@@ -44,6 +54,8 @@ export function buildRow(
     cacheRate: subagentCacheRate(info.tokens),
     elapsedMs: clampElapsed(opts.prevElapsed, subagentElapsedMs(info.time, opts.running, opts.now)),
     endedAt: subagentEndedAt(info.time, opts.running),
+    ttftMs: opts.perf?.ttftMs,
+    tps: opts.perf?.tps,
     running: opts.running,
     expanded: opts.expanded,
   }

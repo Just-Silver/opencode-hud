@@ -13,6 +13,7 @@ import {
 } from "../.opencode/plugins/opencode-hud/model/perf.ts"
 import type { PerfMessage } from "../.opencode/plugins/opencode-hud/model/types.ts"
 import {
+  buildRow,
   clampElapsed,
   SPINNER_FRAMES,
   sortRows,
@@ -164,6 +165,28 @@ test("subagentTokens：含缓存读的总消耗", () => {
     1200,
   )
   assert.equal(subagentTokens(undefined), 0)
+})
+
+test("buildRow：透传子代理最近一步的首字与速度", () => {
+  const info = {
+    id: "s",
+    agent: "general",
+    tokens: { output: 1 },
+    time: { created: 1000, idle: 5000 },
+  }
+  const row = buildRow(info, {
+    running: false,
+    expanded: true,
+    now: 6000,
+    perf: { ttftMs: 420, tps: 48 },
+  })
+  assert.equal(row.ttftMs, 420)
+  assert.equal(row.tps, 48)
+  assert.equal(row.expanded, true)
+
+  const bare = buildRow(info, { running: false, expanded: false, now: 6000 })
+  assert.equal(bare.ttftMs, undefined)
+  assert.equal(bare.tps, undefined)
 })
 
 test("subagentElapsedMs：运行中按 now，结束后用 idle、回退 updated", () => {
