@@ -14,7 +14,7 @@ import {
   visibleRows,
   type SubagentRow,
 } from "../model/subagent.ts"
-import { fmtElapsed, fmtPct, fmtTokens, truncateVisual } from "../shared/format.ts"
+import { fmtElapsed, fmtPct, fmtPerf, fmtTokens, truncateVisual } from "../shared/format.ts"
 import { Collapsible } from "./Collapsible.tsx"
 import { INPUT_COLOR, MUTED_COLOR, SECTION_SUBAGENT_TITLE, TEXT_COLOR, WARN_COLOR } from "./theme.ts"
 
@@ -94,6 +94,15 @@ function Row(props: {
               <text fg={MUTED_COLOR}>{"  命中 "}</text>
               <text fg={TEXT_COLOR}>{fmtPct(props.row.cacheRate)}</text>
             </box>
+          </Show>
+          {/* 行 5：最近一个已完成步的首字 / 速度（与底部同口径）；无样本时整行不渲染 */}
+          <Show when={fmtPerf(props.row.ttftMs, props.row.tps)}>
+            {(text) => (
+              <box flexDirection="row" height={1}>
+                <text fg={MUTED_COLOR}>{"  性能 "}</text>
+                <text fg={TEXT_COLOR}>{text()}</text>
+              </box>
+            )}
           </Show>
         </box>
       </Show>

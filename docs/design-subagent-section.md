@@ -20,6 +20,7 @@
 | 模型 | `session.get(id)?.model?.id` | `ModelRef` 的 `id` |
 | 思考强度 | `session.get(id)?.model?.variant` | 可选；缺失则整段不渲染 |
 | 缓存命中率 | `tokens.cache.read / (input + cache.write + cache.read)` | 与会话区块同一口径（`model/usage.ts` 的 `cacheRateOf`）；无数据则整行不渲染 |
+| 首字 / 速度 | 展开时 `message.sync(id)` → `message.list(id)` → `latestPerf` | **仅展开时取数**；该子代理最近一个已完成步；与底部同口径（`model/perf.ts`） |
 | 状态 | `session.status(id)`：`"running"` / `"idle"` | 用于行首状态点与耗时口径分支 |
 | 结束时刻 | `time.idle ?? time.updated ?? time.created` | **只用于排序**，不展示；运行中不取（见 §3.1） |
 
@@ -99,6 +100,7 @@ running：now − time.created
     模型 deepseek-v4.1-flash (high)
     代理 general
     命中 98.4%
+    性能 0.42s · 48 tok/s
 ```
 
 - **完整标题行**：主行标题必须截断才能给右侧耗时/数值列让位，展开时补一行不截断的标题，用 `wrapMode="char"` 按字符断行（中文标题没有空格，`word` 模式不会断）。`title` 缺失时不渲染该行。
@@ -112,6 +114,7 @@ running：now − time.created
 
 - 主行已被标题占用，**agent 类型放展开行补全**（规格五项：agent / 耗时 / tokens / 模型 / 强度，全部齐备）
 - **完整标题行**用 `wrapMode="char"` 按字符断行；不用 `word`，中文标题没有空格分隔，`word` 模式不会断行
+- **「性能」行**：标签 4 列，值复用 `shared/format.ts` 的 `fmtPerf`（与底部状态行同一实现），34 列内放得下；无有效样本时整行不渲染
 - **思考强度跟随模型名、用括号**；`variant` 缺失时连空格与括号一起省略
 - 模型名过长时整体截断（`truncateVisual`），保留可辨识前缀：`deepseek-v4.1-fla… (high)`
 - **缓存命中率与会话区块同一口径**：`read / (input + write + read)`，一位小数（`model/usage.ts` 的 `cacheRateOf` 是单一事实源，两处共用）。无缓存数据时该行整行不渲染
@@ -146,4 +149,7 @@ running：now − time.created
 
 - 常驻裁剪只省**视觉高度**，不省数据量：`family()` 里的子会话只增不减（宿主行为），19 条时仍要读 19 个 `session.get(id)`（本地内存查询）。真有几百条且实测卡顿，那是渲染量问题，另议。
 - 折叠行展开态是组件内存态（`createSignal`），切换会话 / 侧边栏重建后回到默认折叠；与逐条展开态一样不持久化。
+- **首字 / 速度只在展开时取**：首次展开对子会话做一次 `message.sync(id)`（最近 20 条消息），之后宿主 `step.ended` 写回同一 Solid store，展开行自动更新；不轮询、不新增定时器。`sync.run` 成功后同 key 短路，折叠再展开不重复请求。
+- **性能显示的是「最近一个已完成步」的精确值**，不是整段平均；子代理最后一步若只是短收尾，数值只代表那一步。口径与底部状态行完全相同（`model/perf.ts` 的 `latestPerf`）。
+- 消息窗口只有 20 条；若窗口内全是被守卫拦下的步（无 `time.streamed`、跨度不足等），不向前翻页、不猜，整行不渲染。
 - `family()` 依赖宿主已同步子会话列表。若打开一个从未在本进程加载过子会话的旧会话，可能需要一次 `session.sync(sid, {children: true})` 才有数据；宿主进入会话路由时本来就会做这件事，因此正常路径无需我们触发。若实测发现漏，再在 Sidebar 的 memo 里补一次 `void ctx.data.session.sync(sessionID, { children: true })`（幂等、有 `sync.run` 去重）。

@@ -3,7 +3,7 @@
 # 子代理展开行：首字 / 速度
 
 - 日期：2026-11-02
-- 状态：**待实现**
+- 状态：**已实现**（2026-11-02）
 - 落点：`sidebar.content` → `SubagentSection` 的展开区
 - 前提：opencode2 v2.2.5（已核对 `@opencode/plugin` 与 `@opencode/client` 源码）；不改宿主
 
@@ -103,13 +103,12 @@ SubagentRow.ttftMs / tps
 | 动作 | 文件 | 说明 |
 | --- | --- | --- |
 | 修改 | `shared/format.ts` | 新增 `fmtPerf` |
-| 修改 | `model/types.ts` | `SubagentRow` 不在 types；如需类型放 `model/subagent.ts` |
 | 修改 | `model/subagent.ts` | `SubagentRow` 加 `ttftMs` / `tps`；`buildRow` 接收 `perf` |
 | 修改 | `view/Sidebar.tsx` | `subagentPerf` memo + 展开时 `message.sync` effect；`buildRow` 传入 perf |
 | 修改 | `view/SubagentSection.tsx` | 展开区「命中」之后加「性能」行 |
 | 修改 | `view/PerfFooter.tsx` | 复用 `fmtPerf`，避免两处拼接漂移 |
 | 修改 | `tests/shared.test.ts` | `fmtPerf` 四种组合 |
-| 修改 | `tests/model.test.ts` | `buildRow` 透传 perf（若现有测试结构适合） |
+| 修改 | `tests/perf.test.ts` | `buildRow` 透传 perf |
 | 修改 | `docs/design-subagent-section.md` | 数据来源表、展开布局、已知取舍 |
 | 修改 | `docs/design-performance-footer.md` | §5「侧边栏展示」不再算“不做”，改为指向本文 |
 | 修改 | `AGENTS.md` | 数据口径一句：子代理默认不读消息，展开时按需 sync |
