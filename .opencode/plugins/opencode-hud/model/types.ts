@@ -54,7 +54,7 @@ export type PerfPart = {
 
 export type PerfMessage = {
   type?: string
-  time?: { created?: number; completed?: number }
+  time?: { created?: number; streamed?: number; completed?: number }
   tokens?: TokenLike
   content?: PerfPart[]
   error?: unknown
