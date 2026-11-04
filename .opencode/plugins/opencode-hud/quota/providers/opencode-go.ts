@@ -3,6 +3,7 @@
 // 端点自持：本供应商专属 URL 定义在此文件（通用 registry 层不含任何供应商细节）。
 import type { QuotaData, QuotaItem } from "../../model/types.ts"
 import { fmtResetHint } from "../../shared/format.ts"
+import { requestJson } from "../../shared/http.ts"
 import type { ProviderRegistration } from "../registry.ts"
 
 export const QUOTA_API_URL = "https://opencode.ai/zen/go/v1/usage"
@@ -28,19 +29,12 @@ export function mapOpencodeGo(resp: UsageResp | undefined): QuotaData | undefine
 }
 
 export async function fetchOpencodeGo(apiUrl: string, key: string): Promise<QuotaData | undefined> {
-  const res = await fetch(apiUrl, {
+  // 失败统一由 shared/http 分类（超时/401/429/网络/坏 JSON），错误文本已脱敏。
+  const json = await requestJson(apiUrl, {
     headers: { Authorization: `Bearer ${key}`, "User-Agent": QUOTA_USER_AGENT },
+    secrets: [key],
   })
-  if (!res.ok) {
-    throw new Error(`quota ${res.status} ${res.statusText}`)
-  }
-  let json: UsageResp
-  try {
-    json = (await res.json()) as UsageResp
-  } catch (e) {
-    throw new Error(`quota json parse failed: ${String(e)}`)
-  }
-  return mapOpencodeGo(json)
+  return mapOpencodeGo(json as UsageResp | undefined)
 }
 
 export const provider: ProviderRegistration = {

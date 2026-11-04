@@ -14,6 +14,7 @@ import { dirname, join } from "node:path"
 import {
   credentialIntegrationIDs,
   pickCredentialToken,
+  pickStoredCredentialToken,
   resolveApiKeyFromConfig,
   resolveProviderKey,
 } from "../.opencode/plugins/opencode-hud/quota/key.ts"
@@ -127,4 +128,18 @@ test("pickCredentialToken：按 type 取 key / access，external 等不处理", 
   assert.equal(pickCredentialToken({ type: "oauth" }), undefined)
   assert.equal(pickCredentialToken(null), undefined)
   assert.equal(pickCredentialToken("nope"), undefined)
+})
+
+// 业务规则：直读 DB 时只认 OpenCode 当前使用的那条凭据；它不可用时不拿历史记录顶替，
+// 否则用户切号后仍会用旧 key 查询，或在未登录时被伪装成“有凭据”。
+test("DB 凭据只取当前一条：停在排序后的首行，不因它不可用而回退旧记录", () => {
+  const activeOauth = { value: JSON.stringify({ type: "oauth", access: "at-2" }) }
+  const oldKey = { value: JSON.stringify({ type: "key", key: "sk-old" }) }
+  assert.equal(pickStoredCredentialToken([activeOauth, oldKey]), "at-2")
+
+  const unusableActive = { value: JSON.stringify({ type: "external", methodID: "azure-cli" }) }
+  assert.equal(pickStoredCredentialToken([unusableActive, oldKey]), undefined)
+
+  assert.equal(pickStoredCredentialToken([]), undefined)
+  assert.equal(pickStoredCredentialToken([{ value: "not json" }, oldKey]), undefined)
 })

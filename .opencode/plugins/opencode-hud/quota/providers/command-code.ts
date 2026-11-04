@@ -5,6 +5,7 @@
 // 状态：**已启用**（离线测试与真实数据实测通过）
 // 脱敏：本模块不记日志；key 仅用于 Authorization 请求头。
 import type { QuotaData, QuotaItem } from "../../model/types.ts"
+import { requestJson } from "../../shared/http.ts"
 import type { ProviderRegistration } from "../registry.ts"
 
 export const COMMANDCODE_CREDITS_URL = "https://api.commandcode.ai/alpha/billing/credits"
@@ -69,18 +70,10 @@ export function mapCommandCode(creditsResp: unknown, subResp: unknown): QuotaDat
 // credits 失败 → throw（沿用入口错误日志）；subscriptions 失败 → 降级不 throw
 export async function fetchCommandCode(apiUrl: string, key: string): Promise<QuotaData | undefined> {
   const headers = { Authorization: `Bearer ${key}` }
-  const creditsRes = await fetch(apiUrl, { headers })
-  if (!creditsRes.ok) {
-    throw new Error(`quota ${creditsRes.status} ${creditsRes.statusText}`)
-  }
-  const credits: unknown = await creditsRes.json()
+  const credits = await requestJson(apiUrl, { headers, secrets: [key] })
   let sub: unknown
   try {
-    const subRes = await fetch(COMMANDCODE_SUBSCRIPTIONS_URL, { headers })
-    if (!subRes.ok) {
-      throw new Error(`quota ${subRes.status} ${subRes.statusText}`)
-    }
-    sub = await subRes.json()
+    sub = await requestJson(COMMANDCODE_SUBSCRIPTIONS_URL, { headers, secrets: [key] })
   } catch {
     sub = undefined // 降级：仅月窗口缺失
   }

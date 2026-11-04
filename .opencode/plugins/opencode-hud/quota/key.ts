@@ -19,14 +19,19 @@ import { normID } from "../shared/id.ts"
 const OPENCODE_DATA_DIR_NAME = "opencode" // opencode 数据目录名
 const OPENCODE_DATA_DIR_REL = [".local", "share", "opencode"] // ~ 下相对路径
 const OPENCODE_DB_FILE = "opencode.db"
-const CREDENTIAL_SQL = "SELECT value FROM credential WHERE integration_id = ?"
+// 按 OpenCode 的选行语义排序：active 优先，其次最近更新，最后用 id 定序保证稳定。
+// 同一 integration 可能有多条历史记录（换过 key / 重新登录），顺序不能交给 SQLite 默认。
+const CREDENTIAL_SQL =
+  "SELECT value FROM credential WHERE integration_id = ? ORDER BY active DESC, time_updated DESC, id DESC"
 
 // Console 集成（对齐官方 packages/app/src/providers/connect/controller.ts）：
 // opencode / opencode-go 均通过 OpenCode Console 登录，OAuth 凭据统一写入 integration_id = "opencode"。
 const CONSOLE_INTEGRATION_ID = "opencode"
 const CONSOLE_PROVIDER_NORMS = new Set(["opencode", "opencodego"]) // normID 归一化写法（兼容 opencode_go 等）
 
-const keyCache = new Map<string, string>()
+// 缓存 60s：插件内轮询会频繁解析凭据，但切号/换 key 后要让 store 在一个心跳内发现身份变化。
+const KEY_CACHE_TTL_MS = 60_000
+const keyCache = new Map<string, { key: string; at: number }>()
 
 // {env:VAR} 占位符 → 环境变量；普通字符串原文；占位符替换不到返回 undefined
 function resolveEnvPlaceholder(value: string): string | undefined {
@@ -123,6 +128,19 @@ export function pickCredentialToken(value: unknown): string | undefined {
   }
 }
 
+// DB 行按 active/时间排序后的取用规则：只认第一条（OpenCode 当前使用的那条）。
+// 第一条不可用（external、字段缺失、JSON 坏）时不回退到旧记录——旧 key 已被替换，
+// 拿它请求会把「当前未登录」伪装成「有凭据」，也会让用户切号后继续看到旧账号的数据。
+export function pickStoredCredentialToken(rows: readonly { value?: unknown }[]): string | undefined {
+  const [row] = rows
+  if (typeof row?.value !== "string") return undefined
+  try {
+    return pickCredentialToken(JSON.parse(row.value))
+  } catch {
+    return undefined
+  }
+}
+
 // DB credential 表（对应 opencode 登录/连接写入的凭据），作为配置之后的兜底。
 // 遍历候选 integration_id（API key 归 provider 自己、OAuth 归 Console "opencode"），
 // 命中第一个可取值即返回；不处理 refresh / expires（过期由 opencode 自身刷新写回）。
@@ -135,9 +153,8 @@ async function readDbKey(providerID: string): Promise<string | undefined> {
     const db = new Database(join(base, OPENCODE_DB_FILE), { readonly: true })
     try {
       for (const id of credentialIntegrationIDs(providerID)) {
-        const row = db.query(CREDENTIAL_SQL).get(id) as { value?: string } | undefined
-        if (!row?.value) continue
-        const key = pickCredentialToken(JSON.parse(row.value))
+        const rows = db.query(CREDENTIAL_SQL).all(id) as Array<{ value?: unknown }>
+        const key = pickStoredCredentialToken(rows)
         if (key) return key
       }
       return
@@ -156,8 +173,9 @@ export async function resolveProviderKey(
   opts?: { cwd?: string },
 ): Promise<string | undefined> {
   if (!providerID) return undefined
-  if (keyCache.has(providerID)) return keyCache.get(providerID)
+  const cached = keyCache.get(providerID)
+  if (cached && Date.now() - cached.at < KEY_CACHE_TTL_MS) return cached.key
   const key = resolveApiKeyFromConfig(providerID, opts) ?? (await readDbKey(providerID))
-  if (key) keyCache.set(providerID, key)
+  if (key) keyCache.set(providerID, { key, at: Date.now() })
   return key
 }

@@ -15,7 +15,7 @@ import {
 } from "../model/usage.ts"
 import type { PerfMessage, TokenLike } from "../model/types.ts"
 import { latestPerf } from "../model/perf.ts"
-import { getQuotaStore, QUOTA_REFRESH_MS, type QuotaDeps } from "../model/quota.ts"
+import { getQuotaStore, QUOTA_TICK_MS, type QuotaDeps } from "../model/quota.ts"
 import { buildRow, sortRows, SPINNER_INTERVAL_MS, type SubagentRow } from "../model/subagent.ts"
 import { SubagentSection } from "./SubagentSection.tsx"
 import { fetchQuota, getProviderApiUrl, getProviderRenderer, isQuotaProvider } from "../quota/index.ts"
@@ -194,11 +194,11 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
     const pid = providerID()
     if (pid) void store.load(pid)
   })
-  // timer：每 60s force 轮询（绕过限流，必然真请求；限流与轮询相位解耦）
+  // timer：每 60s 检查一次（凭据/退避）；是否符合网络刷新间隔由 store 判断
   const timer = setInterval(() => {
     const pid = providerID()
-    if (pid) void store.load(pid, { force: true })
-  }, QUOTA_REFRESH_MS)
+    if (pid) void store.load(pid)
+  }, QUOTA_TICK_MS)
   onCleanup(() => clearInterval(timer))
 
   // ── 更新检查（状态由本组件持有，便于整块空时零占位） ──

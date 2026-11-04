@@ -1,7 +1,24 @@
-// ─── 模型层：额度查询状态机（分桶缓存 + 限流 + 并发去重 + 写库订阅通知，依赖注入可单测） ───
+// ─── 模型层：额度查询状态机（凭据分桶 + 刷新/退避 + 并发去重 + 写库订阅通知，依赖注入可单测） ───
+import { createHash } from "node:crypto"
+import { QuotaRequestError, redactSecrets, type QuotaErrorCode } from "../shared/http.ts"
 import type { QuotaData } from "./types.ts"
 
-export const QUOTA_REFRESH_MS = 60_000 // 配额轮询间隔
+// 网络刷新最小间隔：额度接口按次计费/限流，60s 强刷不划算。
+export const QUOTA_REFRESH_MS = 5 * 60_000
+// UI 侧检查心跳：每分钟看一次凭据与退避，真正是否发请求由上面的间隔决定。
+export const QUOTA_TICK_MS = 60_000
+const BACKOFF_BASE_MS = 5 * 60_000
+const BACKOFF_MAX_MS = 15 * 60_000
+const ERROR_TEXT_MAX = 300
+
+export type QuotaErrorState = {
+  code: QuotaErrorCode
+  status?: number
+  /** Retry-After 换算出的绝对时刻；没到点 store 不再请求。 */
+  retryAt?: number
+  /** 已脱敏、已截断，可直接进应用内 console 面板。 */
+  message: string
+}
 
 // 查询服务依赖（生产由入口注入真实实现，测试注入 mock）
 export interface QuotaDeps {
@@ -9,21 +26,75 @@ export interface QuotaDeps {
   resolveKey(pid: string): Promise<string | undefined>
   fetch(pid: string, apiUrl: string, key: string): Promise<QuotaData | undefined>
   log(level: "warn" | "error", message: string): void
+  /** 可注入时钟，供退避/间隔测试；生产用 Date.now。 */
+  now?(): number
+}
+
+type Entry = {
+  /** 凭据指纹：key 变了就是另一个账号，旧行不能继续展示。 */
+  fingerprint: string
+  data?: QuotaData
+  /** 上次尝试结束的时刻；没有表示这个凭据还没请求过。 */
+  at?: number
+  failures: number
+  retryAt?: number
+  error?: QuotaErrorState
+}
+
+function fingerprintOf(key: string): string {
+  return createHash("sha256").update(key).digest("hex").slice(0, 16)
+}
+
+function backoffMs(failures: number): number {
+  return Math.min(BACKOFF_MAX_MS, BACKOFF_BASE_MS * 2 ** (failures - 1))
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error)
+}
+
+function errorStateOf(error: unknown, key: string): QuotaErrorState {
+  const message = redactSecrets(errorText(error), [key]).slice(0, ERROR_TEXT_MAX)
+  if (error instanceof QuotaRequestError) {
+    return {
+      code: error.code,
+      message,
+      ...(error.status === undefined ? {} : { status: error.status }),
+      ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+    }
+  }
+  return { code: "provider_error", message }
 }
 
 export class QuotaStore {
-  private cache = new Map<string, QuotaData>() // 字典：providerID -> QuotaData
-  private at = new Map<string, number>() // 字典：providerID -> 上次刷新时间戳
-  private inFlight = new Map<string, Promise<void>>() // 去重：同 provider 并发只发一次
-  private version = 0 // 数据版本号（每次写库递增）
-  private listeners = new Set<() => void>() // 写库通知订阅者（组件订阅当前实例）
+  private entries = new Map<string, Entry>()
+  private inFlight = new Map<string, Promise<boolean>>()
+  private listeners = new Set<() => void>()
   private deps: QuotaDeps
 
   constructor(deps: QuotaDeps) {
     this.deps = deps
   }
 
-  // 订阅数据变更（仅在真正写入 cache 时通知）；返回退订函数（组件 onCleanup 调用）
+  private now(): number {
+    return this.deps.now?.() ?? Date.now()
+  }
+
+  private bump() {
+    for (const fn of [...this.listeners]) fn()
+  }
+
+  // 当前缓存（只属于最近一次 load 解析出的凭据）
+  get(pid: string): QuotaData | undefined {
+    return this.entries.get(pid)?.data
+  }
+
+  // 最近一次请求失败的结构化原因（未失败/已恢复 → undefined）
+  error(pid: string): QuotaErrorState | undefined {
+    return this.entries.get(pid)?.error
+  }
+
+  // 订阅数据变更（仅在缓存真正变化时通知）；返回退订函数（组件 onCleanup 调用）
   subscribe(fn: () => void): () => void {
     this.listeners.add(fn)
     return () => {
@@ -31,52 +102,92 @@ export class QuotaStore {
     }
   }
 
-  private bump() {
-    this.version++
-    for (const fn of [...this.listeners]) fn()
+  // 取（或切换）当前凭据对应的桶。指纹变了 = 换了账号：旧数据立刻作废并清空退避，
+  // 不能等新请求成功才替换，否则切号后最多还有一个刷新周期的旧账号数据。
+  private adopt(pid: string, fingerprint: string): Entry {
+    const existing = this.entries.get(pid)
+    if (existing && existing.fingerprint === fingerprint) return existing
+    const next: Entry = { fingerprint, failures: 0 }
+    this.entries.set(pid, next)
+    if (existing?.data !== undefined) this.bump()
+    return next
   }
 
-  // 当前缓存值（未加载过返回 undefined）
-  get(pid: string): QuotaData | undefined {
-    return this.cache.get(pid)
-  }
-
-  // 按需加载：默认 60s 限流（opts.force 跳过，供定时轮询使用）；并发去重。
-  // 返回 true = 当前有该 pid 缓存（新写入或等待并发完成后已有）。
+  // 按需加载：默认尊重 5min 刷新间隔与失败退避；opts.force 只绕过成功态的间隔，
+  // 不绕过失败退避与 Retry-After（timer 轮询用，避免限流时持续加压）。
+  // 返回 true = 本次拿到了可用数据；被间隔/退避/Retry-After 跳过返回 false。
   async load(pid: string, opts?: { force?: boolean }): Promise<boolean> {
-    const now = Date.now()
-    if (!opts?.force && now - (this.at.get(pid) ?? 0) < QUOTA_REFRESH_MS) return false
+    const apiUrl = this.deps.apiUrlFor(pid)
+    if (!apiUrl) {
+      const entry = this.adopt(pid, "")
+      entry.at = this.now()
+      this.deps.log("warn", `quota ${pid} missing api url`)
+      return false
+    }
+
+    // 先解析凭据再判断间隔：否则旧凭据的退避会挡住新凭据的第一次尝试。
+    let key: string | undefined
+    try {
+      key = await this.deps.resolveKey(pid)
+    } catch {
+      key = undefined
+    }
+    const fingerprint = key ? fingerprintOf(key) : ""
+    const entry = this.adopt(pid, fingerprint)
+    if (!key) {
+      entry.at = this.now()
+      this.deps.log("warn", `quota ${pid} missing key`)
+      return false
+    }
+
+    const now = this.now()
+    // 服务端给了 Retry-After 就以它为准：到点就试一次，不再叠加本地退避。
+    let retryDue = false
+    if (entry.retryAt !== undefined) {
+      if (now < entry.retryAt) return false
+      entry.retryAt = undefined
+      retryDue = true
+    }
+    const waitMs = entry.failures > 0 ? backoffMs(entry.failures) : QUOTA_REFRESH_MS
+    const forced = opts?.force === true && entry.failures === 0
+    if (!retryDue && entry.at !== undefined && now - entry.at < waitMs && !forced) {
+      return false
+    }
+
     if (this.inFlight.has(pid)) {
       await this.inFlight.get(pid)
-      return this.cache.has(pid) // 并发等待完成后：缓存可能已被写入
+      return this.entries.get(pid)?.data !== undefined // 并发等待完成后：缓存可能已被写入
     }
+
     const p = (async (): Promise<boolean> => {
-      const apiUrl = this.deps.apiUrlFor(pid)
-      if (!apiUrl) {
-        this.at.set(pid, now)
-        this.deps.log("warn", `quota ${pid} missing api url`)
-        return false
-      }
-      const key = await this.deps.resolveKey(pid)
-      if (!key) {
-        this.at.set(pid, now)
-        this.deps.log("warn", `quota ${pid} missing key`)
-        return false
-      }
       try {
         const usage = await this.deps.fetch(pid, apiUrl, key)
+        const current = this.entries.get(pid)
+        // 请求期间切了凭据：这是旧账号的结果，丢弃，不覆盖新桶。
+        if (!current || current.fingerprint !== fingerprint) return false
         if (usage) {
-          this.cache.set(pid, usage)
-          this.at.set(pid, now)
+          this.entries.set(pid, { fingerprint, data: usage, at: this.now(), failures: 0 })
           this.bump() // 写库即通知订阅者（当前组件刷新，跨组件重建安全）
           return true
         }
-        this.at.set(pid, now)
+        current.at = this.now()
+        current.failures = 0
+        current.error = undefined
         this.deps.log("warn", `quota ${pid} empty response`)
         return false
-      } catch (e) {
-        this.at.set(pid, now)
-        this.deps.log("error", `quota ${pid} fetch failed: ${String(e)}`)
+      } catch (caught) {
+        const current = this.entries.get(pid)
+        if (!current || current.fingerprint !== fingerprint) return false
+        const error = errorStateOf(caught, key)
+        this.entries.set(pid, {
+          fingerprint,
+          ...(current.data === undefined ? {} : { data: current.data }),
+          at: this.now(),
+          failures: current.failures + 1,
+          ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+          error,
+        })
+        this.deps.log("error", `quota ${pid} fetch failed: ${error.message}`)
         return false
       }
     })().finally(() => this.inFlight.delete(pid))
