@@ -15,7 +15,7 @@
 
 # 校验（改完必跑）
 
-- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 136 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
+- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 148 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
 - 测试按 `node:test` 写，不要用 `bun test` 代替。
 - 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
@@ -57,8 +57,9 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `provider = { id, apiUrl, render?, enabled?, fetch }`；`fetch` 返回 `QuotaData = { items: [{ label, percent?, text?, hint? }] }`。契约只放渲染原语，不要加 `resetsAt` 之类语义字段。
 - 未用真实响应验证前用 `enabled: false`；展示设计（显示哪几行、标签叫什么）先与用户确认。
 - 白名单、URL、fetcher 分发均按 `normID`（小写 + 仅保留 a-z）匹配；未注册/未启用返回 `undefined`，**无兜底**。
-- 凭据统一在 `quota/key.ts`：keyCache → 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 按 `type` 取值：`key` → `key`，`oauth` → `access`；`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下。只读现值，不刷新、不落盘、不写日志。
-- `QuotaStore` 按 providerID 分桶：60s 限流、并发去重、写库后 `subscribe` 通知。Sidebar 每 60s 用 `load(pid, { force: true })` 轮询，切回会话走缓存。
+- 凭据统一在 `quota/key.ts`：keyCache（60s TTL）→ 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 取 `active` 且最近更新的那条（`ORDER BY active DESC, time_updated DESC, id DESC`），按 `type` 取值：`key` → `key`，`oauth` → `access`；该条不可用时不回退旧记录。`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下。只读现值，不刷新、不落盘、不写日志。
+- `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。Sidebar 每 60s 用 `QUOTA_TICK_MS` 检查一次（凭据/退避），是否符合刷新间隔由 store 决定，切回会话走缓存。
+- 网络请求统一走 `shared/http.ts`：5s 超时/中止、8MB 上限、`Retry-After`、401/429/超时/网络/坏 JSON 归类、错误文本先脱敏再截断。provider 不再直接 `fetch`。
 - 当前已启用：`opencode-go`（`/zen/go/v1/usage`）与 `command-code`（credits + subscriptions 双 API）。Zen 侧 `/zen/v1/usage` 为 404，所以 `opencode` 不接额度。
 
 # 数据口径（别自己发明）
@@ -82,6 +83,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `docs/design-performance-footer.md` — 首字/速度口径、守卫与 footer 布局；改速度逻辑前必读。
 - `docs/design-subagent-section.md` — 子代理区块取数、耗时口径与布局。
 - `docs/reference-opencode-cache-and-tps.md` — 外部同类插件的可借鉴设计。
+- `docs/reference-opencode-quota.md` — 外部同类项目 opencode-quota 的可借鉴项（行语义/配速、HTTP、凭据、刷新、server+RPC、用量与工程化取舍）。
 - `docs/reference-desktop-gui-plugins.md` — OpenCode Desktop GUI 插件（`./gui-experimental`）开发手册：构建/加载规则、窗口与主进程上下文、注册表、Ipc/存储/生命周期、排障；**§15 是 2.2.0 实机验证结论**（目录型插件三入口、server 可 import 什么、共用 RPC 契约、槽位真实跨度）。
 - `docs/reference-realtime-tps.md` — 历史调研；实时 TPS 已在 v4.0.0 移除。
 - `docs/provider-open-design.md` — OpenDesign 额度探测：推理 API Key 无端点；Control Key 可查 preflight + wallet（未接入）。

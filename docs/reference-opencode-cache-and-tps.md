@@ -102,8 +102,8 @@
 ## 6. 网络健壮性
 
 - 对方所有 http 都带中止：余额请求 `AbortController` + 10s 超时 + **代际序列号**（旧请求完成即作废，不覆盖新状态）；更新检查 `AbortSignal.timeout(8s)`；解压 120s。
-- 我们 `QuotaStore.load` 的 `inFlight` 只在 Promise settle 时删除，而各 provider 的 `fetch` **没有传 signal / 超时** → 一次挂起的请求会让该 provider 永久处于 inFlight，后续 `load` 一直 await 它，不再重试。
-- 对方轮询 5min，我们 60s 强制轮询；结合额度接口成本可考虑放宽或改为「有变化才查」。
+- 我们 `QuotaStore.load` 的 `inFlight` 只在 Promise settle 时删除，而各 provider 的 `fetch` **没有传 signal / 超时** → 一次挂起的请求会让该 provider 永久处于 inFlight，后续 `load` 一直 await 它，不再重试。**（2026-11-05 已修：`shared/http.ts` 统一 5s 超时/中止，见 `docs/reference-opencode-quota.md`）**
+- 对方轮询 5min，我们 60s 强制轮询；结合额度接口成本可考虑放宽或改为「有变化才查」。**（2026-11-05 已改为 60s 心跳 + 5min 网络刷新 + 失败退避）**
 
 ## 7. 设置持久化（无命令层）
 
