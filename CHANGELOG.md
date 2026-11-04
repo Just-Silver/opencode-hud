@@ -3,6 +3,21 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.3.1] - 2026-11-04
+
+
+### 修复
+
+- 修正 DB 凭据选取并加固额度请求与刷新策略
+
+### 文档
+
+- 新增 opencode-quota 参考并更新额度行为说明
+
+### 杂项
+
+- 更新 CHANGELOG 到 v4.3.0
+- 发布 v4.3.1
 ## [4.3.0] - 2026-11-01
 
 
