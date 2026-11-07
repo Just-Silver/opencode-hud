@@ -1,5 +1,9 @@
 <!-- 职责：opencode-hud 的双入口形态（TUI + 桌面 GUI）——入口解析、无构建约束、桌面侧能做什么/不能做什么，以及 Markdown 配色与后续 HUD 面板的实现路线；不写：GUI 插件通用开发手册（见 reference-desktop-gui-plugins.md）、额度与性能口径（见各自设计文档）。 -->
 
+> **状态：已冻结（2026-11-08）。** 桌面入口与 Markdown 配色已从仓库和全局插件目录删除，桌面版恢复原样，本插件当前只服务 TUI。
+> 恢复方法：`git show 91610a8:.opencode/plugins/opencode-hud/gui-experimental.cjs > .opencode/plugins/opencode-hud/gui-experimental.cjs`，再装到全局目录（`~/.config/opencode/plugins/opencode-hud/`）并重载插件。
+> 本文档保留设计细节与第二阶段路线，供以后恢复时参考；里面的「已实现」均指当时的提交，不代表当前状态。
+
 # 双入口设计：TUI + 桌面版
 
 > 依据：本地源码 `E:\Code\Projects\Agent\Externals\opencode`（2.2.6），以及本仓库 `docs/reference-desktop-gui-plugins.md` 中 2.2.0 的实机结论。GUI 插件 API 仍是实验性（`gui-experimental`），升级 OpenCode 后要重新冒烟。
