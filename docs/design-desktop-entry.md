@@ -8,7 +8,7 @@
 
 > 依据：本地源码 `E:\Code\Projects\Agent\Externals\opencode`（2.2.6），以及本仓库 `docs/reference-desktop-gui-plugins.md` 中 2.2.0 的实机结论。GUI 插件 API 仍是实验性（`gui-experimental`），升级 OpenCode 后要重新冒烟。
 
-## 1. 现状与硬约束
+## 1. 背景与硬约束（冻结前）
 
 - **目录型插件可以被两条链路分别加载**：TUI 进程扫描 `tui.tsx`；桌面走 server 的插件列表，读取同目录的 `gui-experimental.cjs` / `.js`。
 - **GUI 入口只接受 `.cjs` / `.js`**，TS 源文件和 ESM 都不算入口。本仓库没有构建步骤，所以桌面入口是**手写 CommonJS**，不引入 Vite。
@@ -20,21 +20,21 @@
 - **窗口进程里 `node:*` / `electron` 是 inert placeholder**：`fs`、`sqlite`、`child_process` 读到的是 Proxy。现有 `quota/key.ts`、`update/apply.ts` 一行都不能在窗口里跑。
 - 安装与更新都是**整目录复制**（`install.*` 的 `Copy-Item -Recurse` / `tar` 解压后 `cp`），新增的 `.cjs` 会自动分发；`update/apply.ts` 目前只校验 `tui.tsx`，不需要改。
 
-## 2. 入口形态
+## 2. 入口形态（冻结前）
 
 ```text
 .opencode/plugins/opencode-hud/
-├── tui.tsx                 # TUI 入口（既有）
-├── gui-experimental.cjs    # 桌面 GUI 入口（本次新增，无构建）
+├── tui.tsx                 # TUI 入口（现状）
+├── gui-experimental.cjs    # 桌面 GUI 入口（冻结前存在，已删除）
 ├── index.ts                # 后续：server 入口（额度查询、更新）
 ├── rpc.ts                  # 后续：TUI 与桌面共用的契约
 ├── model/ quota/ shared/ view/ update/
 └── footer.tsx
 ```
 
-TUI 侧不受影响：发现器只找 `tui.tsx`，新增的 `.cjs` 不会被执行。
+当前仓库只有 TUI 模块；`gui-experimental.cjs` 已随冻结删除。TUI 侧不受影响：发现器只找 `tui.tsx`。
 
-## 3. 第一阶段：桌面 Markdown 配色（已实现）
+## 3. 第一阶段：桌面 Markdown 配色（已实现，后冻结）
 
 ### 3.1 问题
 
@@ -55,7 +55,7 @@ strong, b  { color: var(--v2-text-text-base); }
 
 ### 3.2 实现
 
-`gui-experimental.cjs` 通过 `Style` 注册表注入 CSS（`packages/app/src/runtime/plugin/render.tsx` 的 `PluginStyles` 会 `<style data-plugin>` 注入 `document.head`，全局生效）：
+`gui-experimental.cjs`（冻结前存在，已删除）通过 `Style` 注册表注入 CSS（`packages/app/src/runtime/plugin/render.tsx` 的 `PluginStyles` 会 `<style data-plugin>` 注入 `document.head`，全局生效）：
 
 ```js
 const { Plugin, Style } = require("@opencode/plugin/gui")
@@ -99,22 +99,24 @@ module.exports = Plugin.define({ setup: (ctx) => ctx.add(Style, css) })
 
 ## 5. 验证
 
+当前仓库只有 TUI，验证命令仍是：
+
 ```powershell
-node --check .opencode/plugins/opencode-hud/gui-experimental.cjs
 node --test tests/*.test.ts
 ```
 
-桌面冒烟（不动真实配置时用临时 `XDG_CONFIG_HOME` 隔离）：
+以下为**冻结前**的桌面验证步骤，仅在恢复桌面入口后才适用：
 
 ```powershell
+node --check .opencode/plugins/opencode-hud/gui-experimental.cjs
 opencode2 api --standalone --print-logs GET /api/plugin
 ```
 
-过滤 `loading plugin` / `WARN failed to load plugin`。插件默认装在 `$XDG_CONFIG_HOME/opencode/plugins/opencode-hud`（Windows 为 `$HOME/.config/...`）；桌面只加载**它自己 server** 上的插件，所以确认当前 server 就是装插件的那一个。
+过滤 `loading plugin` / `WARN failed to load plugin`。插件装在 `$XDG_CONFIG_HOME/opencode/plugins/opencode-hud`（Windows 为 `$HOME/.config/...`）；桌面只加载**它自己 server** 上的插件，恢复时要确认 server 就是装插件的那一个。
 
-验收：桌面会话里标题、加粗、强调、行内代码、引用、列表标记与 TUI 默认主题（`opencode`, v2）一致；切换桌面主题时这些角色颜色不变、正文仍跟随主题；TUI 侧栏与性能块不受影响。
+冻结前的验收口径：桌面会话里标题、加粗、强调、行内代码、引用、列表标记与 TUI 默认主题（`opencode`, v2）一致；切换桌面主题时这些角色颜色不变、正文仍跟随主题；TUI 侧栏与性能块不受影响。
 
-## 6. 风险与未决
+## 6. 风险与未决（冻结前的状态，恢复时重新核对）
 
 - **加载来源**：自动发现的全局目录在源码上会登记 `features.gui`，但官方文档要求把 GUI 插件写进全局 `opencode.json(c)`。发行前用真实安装包两种方式各测一次。
 - **id 归属**：现在没有 server 入口，id 取目录名；一旦加 `index.ts`，id 改由 server 的 `Plugin.define` 决定，必须保持 `opencode-hud`，否则命令/面板/存储键会漂移。
