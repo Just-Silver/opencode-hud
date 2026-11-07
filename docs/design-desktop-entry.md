@@ -108,7 +108,7 @@ opencode2 api --standalone --print-logs GET /api/plugin
 
 过滤 `loading plugin` / `WARN failed to load plugin`。插件默认装在 `$XDG_CONFIG_HOME/opencode/plugins/opencode-hud`（Windows 为 `$HOME/.config/...`）；桌面只加载**它自己 server** 上的插件，所以确认当前 server 就是装插件的那一个。
 
-验收：桌面会话里标题、加粗、行内代码、引用、列表标记、`hr` 跟随当前主题；切换主题与深浅色后仍然跟随；TUI 侧栏与性能块不受影响。
+验收：桌面会话里标题、加粗、强调、行内代码、引用、列表标记与 TUI 默认主题（`opencode`, v2）一致；切换桌面主题时这些角色颜色不变、正文仍跟随主题；TUI 侧栏与性能块不受影响。
 
 ## 6. 风险与未决
 
@@ -116,4 +116,4 @@ opencode2 api --standalone --print-logs GET /api/plugin
 - **id 归属**：现在没有 server 入口，id 取目录名；一旦加 `index.ts`，id 改由 server 的 `Plugin.define` 决定，必须保持 `opencode-hud`，否则命令/面板/存储键会漂移。
 - **样式全局性**：`Style` 注入到整个文档，选择器必须始终带 `[data-component="markdown"]` 前缀，避免影响其他界面。
 - **实验性 API**：`gui-experimental` 与注册表随 OpenCode 版本变化；升级后重跑构建（TUI 的 esbuild 检查）与桌面冒烟。
-- **上游修复**：若 `anomalyco/opencode#61221` 落地（把 `markdown.css` 改接 `--markdown-*`），本插件的注入可以整体删除，不会与上游叠加出错误颜色。
+- **上游修复**：若 `anomalyco/opencode#61221` 落地（把 `markdown.css` 接回 `--markdown-*`），需要重新评估本插件的钉值——它仍会用固定色覆盖上游，届时应删除或改成跟随主题。
