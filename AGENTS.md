@@ -6,16 +6,19 @@
 
 # 仓库速览
 
-- 单一 opencode2 TUI 插件仓库，非 monorepo。**没有根 `package.json`、lockfile 或构建步骤**；测试用 Node 内建，不要为跑测试引入依赖或打包配置。
-- 唯一插件：`.opencode/plugins/opencode-hud/`，入口 `tui.tsx`（`Plugin.define id:"opencode-hud"`），注册两个 slot：
-  - `sidebar.content` → `view/Sidebar.tsx`（ViewModel：信号/memo/副作用都在这里）
-  - `prompt.footer.status` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度）
+- 单一 opencode2 插件仓库（TUI + 桌面 GUI 双入口），非 monorepo。**没有根 `package.json`、lockfile 或构建步骤**；测试用 Node 内建，不要为跑测试引入依赖或打包配置。
+- 唯一插件：`.opencode/plugins/opencode-hud/`：
+  - TUI 入口 `tui.tsx`（`Plugin.define id:"opencode-hud"`），注册两个 slot：
+    - `sidebar.content` → `view/Sidebar.tsx`（ViewModel：信号/memo/副作用都在这里）
+    - `prompt.footer.status` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度）
+  - 桌面 GUI 入口 `gui-experimental.cjs`（手写 CommonJS，无构建）：目前只注入 Markdown 配色；双入口方案与后续 HUD 面板见 `docs/design-desktop-entry.md`。
 - 目录职责：`model/` = 数据与纯函数；`quota/` = 供应商发现 + 凭据 + 查询；`shared/` = 通用纯函数；`view/` = Solid UI；`update/` = 更新检查与一键更新。
 - **相对导入必须带 `.ts`/`.tsx` 后缀**：运行时由 Bun 逐文件直接 import，没有打包器做后缀解析。
 
 # 校验（改完必跑）
 
 - 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 148 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
+- 桌面入口语法检查：`node --check .opencode/plugins/opencode-hud/gui-experimental.cjs`。
 - 测试按 `node:test` 写，不要用 `bun test` 代替。
 - 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
@@ -85,6 +88,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `docs/reference-opencode-cache-and-tps.md` — 外部同类插件的可借鉴设计。
 - `docs/reference-opencode-quota.md` — 外部同类项目 opencode-quota 的可借鉴项（行语义/配速、HTTP、凭据、刷新、server+RPC、用量与工程化取舍）。
 - `docs/reference-desktop-gui-plugins.md` — OpenCode Desktop GUI 插件（`./gui-experimental`）开发手册：构建/加载规则、窗口与主进程上下文、注册表、Ipc/存储/生命周期、排障；**§15 是 2.2.0 实机验证结论**（目录型插件三入口、server 可 import 什么、共用 RPC 契约、槽位真实跨度）。
+- `docs/design-desktop-entry.md` — 本插件双入口（TUI + 桌面）的形态与约束、桌面 Markdown 配色实现、后续 HUD 面板的数据通道与验证方式。
 - `docs/reference-realtime-tps.md` — 历史调研；实时 TPS 已在 v4.0.0 移除。
 - `docs/provider-open-design.md` — OpenDesign 额度探测：推理 API Key 无端点；Control Key 可查 preflight + wallet（未接入）。
 - `.opencode/skills/managing-quota-providers/SKILL.md` — 供应商新增/修改/删除流程。
