@@ -3,6 +3,24 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [4.4.0] - 2026-11-10
+
+
+### 文档
+
+- 修正桌面入口的验收与上游修复说明
+- 清理冻结文档中的失效桌面入口命令
+
+### 新功能
+
+- 新增桌面 GUI 入口并钉 TUI Markdown 配色
+- 接入 OpenAI/ChatGPT 订阅额度查询
+
+### 杂项
+
+- 更新 CHANGELOG 到 v4.3.1
+- 冻结并移除桌面版 GUI 入口
+- 发布 4.4.0
 ## [4.3.1] - 2026-11-04
 
 
