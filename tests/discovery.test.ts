@@ -6,6 +6,7 @@ import assert from "node:assert/strict"
 import { isQuotaProvider, getProviderApiUrl } from "../.opencode/plugins/opencode-hud/quota/index.ts"
 import { COMMANDCODE_CREDITS_URL } from "../.opencode/plugins/opencode-hud/quota/providers/command-code.ts"
 import { QUOTA_API_URL } from "../.opencode/plugins/opencode-hud/quota/providers/opencode-go.ts"
+import { OPENAI_USAGE_URL } from "../.opencode/plugins/opencode-hud/quota/providers/openai.ts"
 
 test("自动发现：扫描 providers/ 后 opencode-go 已注册（任意写法命中）", () => {
   assert.equal(isQuotaProvider("opencode-go"), true)
@@ -18,8 +19,14 @@ test("自动发现：command-code 已启用并注册（任意写法命中）", (
   assert.equal(isQuotaProvider("commandcode"), true)
 })
 
+test("自动发现：openai 已启用并注册（任意写法命中）", () => {
+  assert.equal(isQuotaProvider("openai"), true)
+  assert.equal(isQuotaProvider("OpenAI"), true)
+})
+
 test("自动发现：URL 查找命中专属端点、未注册无兜底返回 undefined", () => {
   assert.equal(getProviderApiUrl("opencode-go"), QUOTA_API_URL)
   assert.equal(getProviderApiUrl("command-code"), COMMANDCODE_CREDITS_URL)
+  assert.equal(getProviderApiUrl("openai"), OPENAI_USAGE_URL)
   assert.equal(getProviderApiUrl("nope"), undefined) // 未注册 → 不兜底
 })

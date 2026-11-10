@@ -16,7 +16,7 @@
 
 # 校验（改完必跑）
 
-- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 148 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
+- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 156 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
 - 测试按 `node:test` 写，不要用 `bun test` 代替。
 - 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
@@ -58,10 +58,10 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `provider = { id, apiUrl, render?, enabled?, fetch }`；`fetch` 返回 `QuotaData = { items: [{ label, percent?, text?, hint? }] }`。契约只放渲染原语，不要加 `resetsAt` 之类语义字段。
 - 未用真实响应验证前用 `enabled: false`；展示设计（显示哪几行、标签叫什么）先与用户确认。
 - 白名单、URL、fetcher 分发均按 `normID`（小写 + 仅保留 a-z）匹配；未注册/未启用返回 `undefined`，**无兜底**。
-- 凭据统一在 `quota/key.ts`：keyCache（60s TTL）→ 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 取 `active` 且最近更新的那条（`ORDER BY active DESC, time_updated DESC, id DESC`），按 `type` 取值：`key` → `key`，`oauth` → `access`；该条不可用时不回退旧记录。`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下。只读现值，不刷新、不落盘、不写日志。
+- 凭据统一在 `quota/key.ts`：keyCache（60s TTL）→ 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 取 `active` 且最近更新的那条（`ORDER BY active DESC, time_updated DESC, id DESC`），按 `type` 取值：`key` → `key`，`oauth` → `access`；该条不可用时不回退旧记录。`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下；`openai` 的在 `integration_id="openai"`，且**只有 Codex 登录（`chatgpt-browser`/`headless`）的 token 能查额度**，token-sharing 一律 401（见 `docs/provider-openai-quota.md`）。只读现值，不刷新、不落盘、不写日志。
 - `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。Sidebar 每 60s 用 `QUOTA_TICK_MS` 检查一次（凭据/退避），是否符合刷新间隔由 store 决定，切回会话走缓存。
 - 网络请求统一走 `shared/http.ts`：5s 超时/中止、8MB 上限、`Retry-After`、401/429/超时/网络/坏 JSON 归类、错误文本先脱敏再截断。provider 不再直接 `fetch`。
-- 当前已启用：`opencode-go`（`/zen/go/v1/usage`）与 `command-code`（credits + subscriptions 双 API）。Zen 侧 `/zen/v1/usage` 为 404，所以 `opencode` 不接额度。
+- 当前已启用：`opencode-go`（`/zen/go/v1/usage`）、`command-code`（credits + subscriptions 双 API）、`openai`（`chatgpt.com/backend-api/wham/usage`，5h/周 + 有月度额度时补「月」）。Zen 侧 `/zen/v1/usage` 为 404，所以 `opencode` 不接额度。
 
 # 数据口径（别自己发明）
 
@@ -89,6 +89,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `docs/design-desktop-entry.md` — 双入口设计与桌面 Markdown 配色的历史记录（**已冻结**）、恢复方式与后续 HUD 面板路线。
 - `docs/reference-realtime-tps.md` — 历史调研；实时 TPS 已在 v4.0.0 移除。
 - `docs/provider-open-design.md` — OpenDesign 额度探测：推理 API Key 无端点；Control Key 可查 preflight + wallet（未接入）。
+- `docs/provider-openai-quota.md` — OpenAI/ChatGPT 订阅额度：`wham/usage` 端点、真实响应、**只有 Codex 登录凭据可读**（token-sharing 401）与复验命令。
 - `.opencode/skills/managing-quota-providers/SKILL.md` — 供应商新增/修改/删除流程。
 - `CHANGELOG.md` — 发版自动生成、历史冻结；`TODO.md` — 跟踪中的上游问题。
 - 新文档必须在同一次改动中登记到本节目录；代码注释只写不显然的原因/约束，来源、迁移、review 记录放 `docs/` 或本文件。
