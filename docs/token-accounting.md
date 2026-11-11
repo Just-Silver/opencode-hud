@@ -1,8 +1,8 @@
-<!-- 职责：说明侧边栏「缓存」区块各数字的口径、数据来源（含分页陷阱），以及与宿主 DB 的核对方法；不写 UI 布局规范（见 AGENTS.md「UI 视觉规范」）、不写额度查询（见 quota/）。 -->
+<!-- 职责：说明侧边栏「上下文」卡片各数字的口径、数据来源（含分页陷阱），以及与宿主 DB 的核对方法；不写 UI 布局规范（见 AGENTS.md「Solid / UI 硬约束」与 docs/superpowers/specs/2026-11-11-heavy-dashboard-design.md）、不写额度查询（见 quota/）。 -->
 
 # 会话 token 口径与核对方法
 
-侧边栏「缓存」区块的**累计用量**来自 `usageFromTokens(session().tokens)`，即宿主 `SessionInfo.tokens`（DB `session_v2` 的聚合列，覆盖整个会话）；`SessionInfo.tokens` 缺失时才退回 `aggregateUsage()` 对已加载消息求和。
+侧边栏「上下文」卡片的**累计用量**来自 `usageFromTokens(session().tokens)`，即宿主 `SessionInfo.tokens`（DB `session_v2` 的聚合列，覆盖整个会话）；`SessionInfo.tokens` 缺失时才退回 `aggregateUsage()` 对已加载消息求和。
 
 ## 分页陷阱（2026-10-20 实测踩坑）
 
@@ -21,6 +21,20 @@
 | 输入 / 输出 / 推理 / 缓存读(写) | `SessionInfo.tokens` 各分量（宿主为每条消息 `tokens` 的累计） |
 | 缓存命中率 | `read / (input + write + read)`（cc-switch 口径） |
 | 上下文 | **只看最后一条含 tokens 的消息**（最新一页必有），是当前请求的上下文占用，不是累计；与「总量」不能横向比较 |
+
+## 各分量互斥性（2026-11-11 核对宿主源码）
+
+`packages/core/src/session/usage.ts` 的 `SessionUsage.tokens()` 把 provider 的 usage 映射成五个互斥字段：
+
+| 字段 | 来源 |
+| --- | --- |
+| `input` | `nonCachedInputTokens`（非缓存输入） |
+| `output` | `visibleOutputTokens`（可见输出） |
+| `reasoning` | `reasoningTokens`（推理，独立计） |
+| `cache.read` | `cacheReadInputTokens` |
+| `cache.write` | `cacheWriteInputTokens` |
+
+因此 `input + output + reasoning + cache.read + cache.write` 是真实的会话总量，五个分量互斥，**不存在 reasoning 被 output 重复包含**的问题。缓存读取通常占 95%+，所以 HUD 不画堆叠构成条（33 列下只会是一条满格绿，没有信息量），只保留明细行里的真实数值与占比；不要为了「好看」调权重或加最小宽度。
 
 范围上还有两条硬边界：
 

@@ -1,7 +1,7 @@
 // ─── shared/ 共享帮助函数单元测试 ───
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { dividerLine, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, quotaPct, quotaSummaryText, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
+import { dividerLine, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, fmtAge, quotaPct, quotaSummaryText, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
 import { normID } from "../.opencode/plugins/opencode-hud/shared/id.ts"
 import { parseJson } from "../.opencode/plugins/opencode-hud/shared/jsonc.ts"
 
@@ -138,4 +138,17 @@ test("quotaSummaryText：标签 + 百分比/文本，带重置提示时一并显
   assert.equal(quotaSummaryText({ label: "周", percent: 69 }), "周 69%")
   assert.equal(quotaSummaryText({ label: "余额", text: "$12.3" }), "余额 $12.3")
   assert.equal(quotaSummaryText(undefined), "")
+})
+
+// ─── fmtAge：数据新鲜度短格式 ───
+test("fmtAge：刚刚 / 分钟 / 小时 / 天（只做展示，不参与计算）", () => {
+  assert.equal(fmtAge(0), "刚刚")
+  assert.equal(fmtAge(59_000), "刚刚")
+  assert.equal(fmtAge(60_000), "1m")
+  assert.equal(fmtAge(59 * 60_000), "59m")
+  assert.equal(fmtAge(60 * 60_000), "1h")
+  assert.equal(fmtAge(2.44 * 3600_000), "2.4h")
+  assert.equal(fmtAge(30 * 3600_000), "1d")
+  assert.equal(fmtAge(undefined), "")
+  assert.equal(fmtAge(-1), "")
 })

@@ -8,6 +8,8 @@ import { createRegistry, type ProviderRegistration } from "../.opencode/plugins/
 import {
   isQuotaRowOpen,
   orderQuotaProviders,
+  quotaErrorLabel,
+  quotaStatusTrail,
   representativeItem,
   toggleQuotaRowState,
 } from "../.opencode/plugins/opencode-hud/model/quota.ts"
@@ -187,4 +189,70 @@ test("listProviders：保持注册顺序（发现顺序），不排序", () => {
     { id: "a-provider", name: "A", apiUrl: "u", fetch: async () => undefined },
   ])
   assert.deepEqual(reg.listProviders().map((p) => p.id), ["b-provider", "a-provider"])
+})
+
+// ─── 新鲜度展示（纯函数） ───
+const statusOf = (over: Partial<import("../.opencode/plugins/opencode-hud/model/types.ts").QuotaStatus> = {}) => ({
+  phase: "ready" as const,
+  hasData: true,
+  fetching: false,
+  ageMs: 3 * 60_000,
+  stale: false,
+  ...over,
+})
+
+test("quotaErrorLabel：失败原因归成短标签（不含英文/密钥细节）", () => {
+  assert.equal(quotaErrorLabel({ code: "login_expired" }), "凭据失效")
+  assert.equal(quotaErrorLabel({ code: "rate_limited" }), "限流")
+  assert.equal(quotaErrorLabel({ code: "timeout" }), "超时")
+  assert.equal(quotaErrorLabel({ code: "network" }), "网络异常")
+  assert.equal(quotaErrorLabel({ code: "bad_response" }), "响应异常")
+  assert.equal(quotaErrorLabel({ code: "provider_error" }), "查询失败")
+  assert.equal(quotaErrorLabel({ code: "unknown-code" }), "查询失败")
+  assert.equal(quotaErrorLabel(undefined), undefined)
+})
+
+test("quotaStatusTrail：展开时给数据年龄，过期转琥珀", () => {
+  assert.deepEqual(quotaStatusTrail(statusOf(), true), { text: "3m", tone: "muted" })
+  assert.deepEqual(quotaStatusTrail(statusOf({ stale: true, ageMs: 12 * 60_000 }), true), {
+    text: "12m",
+    tone: "accent",
+  })
+})
+
+test("quotaStatusTrail：展开时刷新中优先于年龄/错误（正在动作）", () => {
+  assert.deepEqual(quotaStatusTrail(statusOf({ fetching: true }), true), { text: "更新中", tone: "accent" })
+  assert.deepEqual(
+    quotaStatusTrail(statusOf({ fetching: true, error: { code: "network", message: "x" } }), true),
+    { text: "更新中", tone: "accent" },
+  )
+})
+
+test("quotaStatusTrail：折叠时后台刷新不占位（把宽度留给摘要/重置时间）", () => {
+  assert.equal(quotaStatusTrail(statusOf({ fetching: true }), false), undefined)
+  // 过期且正在刷新：仍要标「旧」，否则折叠行会把旧数据当新鲜
+  assert.deepEqual(quotaStatusTrail(statusOf({ fetching: true, stale: true }), false), {
+    text: "旧",
+    tone: "accent",
+  })
+})
+
+test("quotaStatusTrail：失败但有缓存 → 原因 + 缓存年龄（不隐藏旧数据）", () => {
+  assert.deepEqual(
+    quotaStatusTrail(statusOf({ phase: "error", error: { code: "login_expired", message: "401" }, ageMs: 8 * 60_000 }), true),
+    { text: "凭据失效 8m", tone: "danger" },
+  )
+})
+
+test("quotaStatusTrail：折叠时只有异常才占位（正常数据把宽度留给摘要）", () => {
+  assert.equal(quotaStatusTrail(statusOf(), false), undefined)
+  assert.deepEqual(quotaStatusTrail(statusOf({ stale: true }), false), { text: "旧", tone: "accent" })
+  assert.deepEqual(
+    quotaStatusTrail(statusOf({ phase: "error", error: { code: "timeout", message: "t" } }), false),
+    { text: "失败", tone: "danger" },
+  )
+})
+
+test("quotaStatusTrail：无缓存无错误（尚未取到）不硬凑文案", () => {
+  assert.equal(quotaStatusTrail(statusOf({ phase: "empty", hasData: false, ageMs: undefined }), true), undefined)
 })

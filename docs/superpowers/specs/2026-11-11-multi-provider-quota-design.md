@@ -4,6 +4,7 @@
 
 - 日期：2026-11-11
 - 状态：**已实现**（2026-11-11）
+- 后续：HUD 5.0 在同一数据上补了新鲜度/失败注记（`QuotaStore.status` + `quotaStatusTrail`），见 `docs/superpowers/specs/2026-11-11-heavy-dashboard-design.md`；本文的发现、排序、折叠规则保持不变。
 - 落点：`sidebar.content` → `QuotaSection`
 - 前提：opencode2 v2；不改宿主；沿用 42 列侧栏、5min 刷新、零配置
 

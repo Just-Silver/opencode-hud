@@ -6,6 +6,31 @@ import { subagentElapsedMs, subagentEndedAt, subagentTokens } from "./perf.ts"
 import { cacheRateOf } from "./usage.ts"
 import { fmtTokens } from "../shared/format.ts"
 
+// 运行态：running 由宿主 status 决定；其余取宿主写回的 idle_outcome。
+// 不用 running=false 推断成功（中断/失败/取消都是 idle），outcome 缺失时降级为 stopped。
+export type SubagentState = "running" | "succeeded" | "failed" | "interrupted" | "stopped"
+
+export function subagentStateOf(running: boolean, outcome: SubagentInfo["outcome"]): SubagentState {
+  if (running) return "running"
+  if (outcome === "succeeded" || outcome === "failed" || outcome === "interrupted") return outcome
+  return "stopped"
+}
+
+export function subagentStateLabel(state: SubagentState): string {
+  switch (state) {
+    case "running":
+      return "运行中"
+    case "succeeded":
+      return "完成"
+    case "failed":
+      return "失败"
+    case "interrupted":
+      return "中断"
+    case "stopped":
+      return "已停止"
+  }
+}
+
 // 单条子代理的展示数据
 export type SubagentRow = {
   id: string
@@ -13,6 +38,8 @@ export type SubagentRow = {
   title?: string
   modelID?: string
   variant?: string
+  /** 子代理在用的供应商（退出排序用，不展示） */
+  providerID?: string
   tokens: number
   /** 缓存命中率（%），与会话区块同一口径；无缓存数据时 undefined */
   cacheRate?: number
@@ -24,6 +51,8 @@ export type SubagentRow = {
   /** 该子代理最近通过守卫的速度（tok/s）；与底部 latestPerf 同口径，无样本时 undefined */
   tps?: number
   running: boolean
+  /** 运行/成功/失败/中断/未知；只用于视觉与文案，不参与排序 */
+  state: SubagentState
   expanded: boolean
 }
 
@@ -50,6 +79,7 @@ export function buildRow(
     title: info.title,
     modelID: info.model?.id,
     variant: info.model?.variant,
+    providerID: info.model?.providerID,
     tokens: subagentTokens(info.tokens),
     cacheRate: subagentCacheRate(info.tokens),
     elapsedMs: clampElapsed(opts.prevElapsed, subagentElapsedMs(info.time, opts.running, opts.now)),
@@ -57,6 +87,7 @@ export function buildRow(
     ttftMs: opts.perf?.ttftMs,
     tps: opts.perf?.tps,
     running: opts.running,
+    state: subagentStateOf(opts.running, info.outcome),
     expanded: opts.expanded,
   }
 }
@@ -81,18 +112,17 @@ export function headingOf(row: SubagentRow): string {
   return row.title || row.agent
 }
 
-// 标题行的状态指示灯：运行中数 / 已完成数，形如 `●35 ●1`（上游同款形态）。
-// 与上游的差别：两个数的语义在文档里写死——橙点=运行中、绿点=已完成，
-// 不上游那种「●N 是已完成、另一个 ●N 是失败」的歧义。
-export type StatusLights = {
-  running: number
-  done: number
-}
+// 卡片头计数：运行中 / 已停止 / 失败。三个数各自独立，不把失败藏进「已停止」。
+export type SubagentCounts = { running: number; stopped: number; failed: number }
 
-export function statusLights(rows: readonly SubagentRow[]): StatusLights | undefined {
-  if (rows.length === 0) return undefined
-  const running = rows.filter((r) => r.running).length
-  return { running, done: rows.length - running }
+export function subagentCounts(rows: readonly SubagentRow[]): SubagentCounts {
+  let running = 0
+  let failed = 0
+  for (const row of rows) {
+    if (row.state ? row.state === "running" : row.running) running++
+    if (row.state === "failed") failed++
+  }
+  return { running, stopped: rows.length - running, failed }
 }
 
 // 标题行右端的合计。子代理单项就是真实累计消耗（含缓存读），加总有意义；
@@ -146,7 +176,7 @@ export function visibleRows(
 
 // ── 运行中条目的 spinner ──
 // 字符取自宿主 component/spinner-frames.ts 的 SPINNER_FRAMES（盲文点阵，1 列宽）。
-// 宿主输入框运行态用的是 8 列扫描条（Knight Rider），在 34 列侧边栏里会挤掉标题，
+// 宿主输入框运行态用的是 8 列扫描条（Knight Rider），在 37 列侧边栏里会挤掉标题，
 // 故这里用单字符点阵：语义相同（正在工作），不破坏行宽预算。
 export const SPINNER_FRAMES = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"] as const
 
@@ -160,17 +190,13 @@ export function statusGlyph(running: boolean, frame: number): string {
   return SPINNER_FRAMES[i]
 }
 
-// 运行中子代理的供应商：只算「现在正在烧额度」的，family() 里的历史条目不参与
-export function runningProviderIDs(
-  ids: readonly string[],
-  statusOf: (id: string) => string | undefined,
-  infoOf: (id: string) => SubagentInfo | undefined,
-): string[] {
+// 运行中子代理的供应商：只算「现在正在烧额度」的，历史条目不参与排序。
+// 直接吃已组装好的行，避免为同一份数据重复调用 session.status / session.get。
+export function runningProviderIDs(rows: readonly SubagentRow[]): string[] {
   const out: string[] = []
-  for (const id of ids) {
-    if (statusOf(id) !== "running") continue
-    const pid = infoOf(id)?.model?.providerID
-    if (typeof pid === "string" && pid.length > 0) out.push(pid)
+  for (const row of rows) {
+    if (!row.running) continue
+    if (typeof row.providerID === "string" && row.providerID.length > 0) out.push(row.providerID)
   }
   return out
 }

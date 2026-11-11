@@ -3,6 +3,7 @@ import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
   QUOTA_REFRESH_MS,
+  QUOTA_STALE_MS,
   QuotaStore,
   type QuotaDeps,
 } from "../.opencode/plugins/opencode-hud/model/quota.ts"
@@ -291,4 +292,111 @@ test("凭据切换：重置旧凭据的退避，新凭据可立即请求", async
   key = "key-two"
   failing = false
   assert.equal(await store.load("opencode-go"), true) // 新指纹：不继承旧退避
+})
+// ─── 新鲜度状态（展示元信息，不改变刷新策略） ───
+const flush = () => new Promise((resolve) => setImmediate(resolve))
+
+test("status：未请求 → empty（不猜有数据）", () => {
+  const store = new QuotaStore(makeDeps())
+  const status = store.status("opencode-go")
+  assert.equal(status.phase, "empty")
+  assert.equal(status.hasData, false)
+  assert.equal(status.fetching, false)
+  assert.equal(status.stale, false)
+  assert.equal(status.ageMs, undefined)
+})
+
+test("status：请求在途 → loading；成功后 → ready 且从 0 开始计龄", async () => {
+  let now = 1_000_000
+  let release: (value: QuotaData | undefined) => void = () => {}
+  const deps = makeDeps({
+    now: () => now,
+    fetch: () =>
+      new Promise<QuotaData | undefined>((resolve) => {
+        release = resolve
+      }),
+  })
+  const store = new QuotaStore(deps)
+  const loading = store.load("opencode-go")
+  await flush()
+  assert.equal(store.status("opencode-go").phase, "loading")
+  assert.equal(store.status("opencode-go").fetching, true)
+
+  release(okData)
+  assert.equal(await loading, true)
+  const ready = store.status("opencode-go")
+  assert.equal(ready.phase, "ready")
+  assert.equal(ready.hasData, true)
+  assert.equal(ready.fetching, false)
+  assert.equal(ready.ageMs, 0)
+
+  now += 3 * 60_000
+  assert.equal(store.status("opencode-go").ageMs, 3 * 60_000)
+  assert.equal(store.status("opencode-go").stale, false)
+})
+
+test("status：缓存超过新鲜窗口 → stale（数据仍可展示，不是错误）", async () => {
+  let now = 1_000_000
+  const deps = makeDeps({ now: () => now })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  now += QUOTA_STALE_MS + 1
+  const status = store.status("opencode-go")
+  assert.equal(status.phase, "stale")
+  assert.equal(status.stale, true)
+  assert.equal(status.hasData, true)
+  assert.equal(status.error, undefined)
+})
+
+test("status：刷新失败但保留旧数据 → error 且数据与年龄不被清掉", async () => {
+  let now = 1_000_000
+  let failing = false
+  const deps = makeDeps({
+    now: () => now,
+    fetch: async () => {
+      if (failing) throw new Error("boom")
+      return okData
+    },
+  })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  failing = true
+  now += QUOTA_REFRESH_MS
+  assert.equal(await store.load("opencode-go"), false)
+
+  const status = store.status("opencode-go")
+  assert.equal(status.phase, "error")
+  assert.equal(status.hasData, true)
+  assert.deepEqual(store.get("opencode-go"), okData)
+  assert.equal(status.error?.code, "provider_error")
+  assert.equal(status.ageMs, QUOTA_REFRESH_MS)
+})
+
+test("status：失败且从未成功 → error 但没有数据（UI 不画 0%）", async () => {
+  const deps = makeDeps({ fetch: async () => { throw new Error("boom") } })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  const status = store.status("opencode-go")
+  assert.equal(status.phase, "error")
+  assert.equal(status.hasData, false)
+  assert.equal(store.get("opencode-go"), undefined)
+})
+
+test("status：查询失败原因脱敏后仍可在 UI 上归因", async () => {
+  let now = 1_000_000
+  const deps = makeDeps({
+    now: () => now,
+    fetch: async () => { throw new QuotaRequestError("quota 401: bad token", "login_expired", { status: 401 }) },
+  })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  assert.equal(store.status("opencode-go").error?.code, "login_expired")
+  assert.match(store.status("opencode-go").error?.message ?? "", /quota 401/)
+})
+
+test("status：读取状态本身不触发请求", async () => {
+  const deps = makeDeps()
+  const store = new QuotaStore(deps)
+  for (let i = 0; i < 10; i++) store.status("opencode-go")
+  assert.equal(deps.fetchCalls.length, 0)
 })

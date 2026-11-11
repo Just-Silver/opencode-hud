@@ -1,8 +1,9 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui"
-import { Sidebar } from "./view/Sidebar.tsx"
 import { FooterPerf } from "./footer.tsx"
+import { Sidebar } from "./view/Sidebar.tsx"
 
+// 两个槽位：侧栏仪表盘 + 输入框下方状态行的性能块。
 export default Plugin.define({
   id: "opencode-hud",
   setup(context) {

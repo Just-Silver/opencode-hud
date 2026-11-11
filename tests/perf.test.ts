@@ -19,11 +19,13 @@ import {
   SPINNER_FRAMES,
   sortRows,
   statusGlyph,
-  statusLights,
   subagentCacheRate,
+  subagentCounts,
+  subagentStateOf,
   totalTokensText,
   visibleRows,
   type SubagentRow,
+  type SubagentState,
 } from "../.opencode/plugins/opencode-hud/model/subagent.ts"
 import { calcCacheRate } from "../.opencode/plugins/opencode-hud/model/usage.ts"
 
@@ -200,16 +202,6 @@ test("subagentElapsedMs：运行中按 now，结束后用 idle、回退 updated"
 })
 
 // ── 子代理区块：标题后缀与合计（纯函数） ──
-test("子代理状态指示灯：运行中数与已停止数（不显示 0 的灯在渲染层做）", () => {
-  const mk = (running: boolean): SubagentRow => ({
-    id: "s", agent: "general", tokens: 1, running, expanded: false,
-  })
-  assert.deepEqual(statusLights([mk(false), mk(false), mk(true)]), { running: 1, done: 2 })
-  assert.deepEqual(statusLights([mk(true), mk(true)]), { running: 2, done: 0 })
-  assert.deepEqual(statusLights([mk(false)]), { running: 0, done: 1 })
-  assert.equal(statusLights([]), undefined)
-})
-
 test("子代理合计：各条真实累计消耗相加（含缓存读）", () => {
   const row = (tokens: number): SubagentRow => ({
     id: "s", agent: "general", tokens, running: false, expanded: false,
@@ -325,15 +317,48 @@ test("visibleRows：运行中条数超过上限时也全部保留（复用的老
 })
 
 test("runningProviderIDs：只取运行中子代理的供应商，保持顺序", () => {
-  const infos: Record<string, { model?: { providerID?: string } }> = {
-    s1: { model: { providerID: "openai" } },
-    s2: { model: { providerID: "command-code" } },
-    s3: { model: { providerID: "opencode-go" } },
-    s4: {},
-  }
-  const status: Record<string, string> = { s1: "running", s2: "idle", s3: "running", s4: "running" }
+  const mk = (id: string, running: boolean, providerID?: string): SubagentRow => ({
+    id,
+    agent: "general",
+    tokens: 0,
+    running,
+    expanded: false,
+    providerID,
+    state: running ? "running" : "succeeded",
+  })
+  // 已结束的 s2、缺供应商的 s4 都不参与「正在烧额度」的排序提前
   assert.deepEqual(
-    runningProviderIDs(["s1", "s2", "s3", "s4"], (id) => status[id], (id) => infos[id]),
+    runningProviderIDs([mk("s1", true, "openai"), mk("s2", false, "command-code"), mk("s3", true, "opencode-go"), mk("s4", true)]),
     ["openai", "opencode-go"],
   )
+})
+
+// ── 子代理结局：来自宿主 idle_outcome，不用 running=false 猜成功 ──
+test("subagentStateOf：运行中优先，结束后按 outcome 区分完成/失败/中断", () => {
+  assert.equal(subagentStateOf(true, "failed"), "running") // 运行中带着上一轮的 outcome，不能采信
+  assert.equal(subagentStateOf(false, "succeeded"), "succeeded")
+  assert.equal(subagentStateOf(false, "failed"), "failed")
+  assert.equal(subagentStateOf(false, "interrupted"), "interrupted")
+  assert.equal(subagentStateOf(false, undefined), "stopped")
+})
+
+test("buildRow：把宿主 outcome 带进行状态", () => {
+  const info = { id: "s", agent: "general", tokens: { output: 1 }, time: { created: 1000, idle: 5000 } }
+  assert.equal(buildRow(info, { running: false, expanded: false, now: 6000 }).state, "stopped")
+  assert.equal(buildRow({ ...info, outcome: "failed" }, { running: false, expanded: false, now: 6000 }).state, "failed")
+  assert.equal(buildRow({ ...info, outcome: "failed" }, { running: true, expanded: false, now: 6000 }).state, "running")
+})
+
+test("subagentCounts：运行中 / 已停止 / 失败各自独立，失败不藏进已停止", () => {
+  const mk = (state: SubagentState): SubagentRow => ({
+    id: state + Math.random(), agent: "general", tokens: 1, running: state === "running", state, expanded: false,
+  })
+  assert.deepEqual(subagentCounts([mk("running"), mk("failed"), mk("succeeded")]), {
+    running: 1,
+    stopped: 2,
+    failed: 1,
+  })
+  // outcome 缺失/中断：只算已停止，不冒充成功
+  assert.deepEqual(subagentCounts([mk("stopped"), mk("interrupted")]), { running: 0, stopped: 2, failed: 0 })
+  assert.deepEqual(subagentCounts([]), { running: 0, stopped: 0, failed: 0 })
 })

@@ -2,10 +2,13 @@
 import { createHash } from "node:crypto"
 import { QuotaRequestError, redactSecrets, type QuotaErrorCode } from "../shared/http.ts"
 import { normID } from "../shared/id.ts"
-import type { QuotaData, QuotaItem } from "./types.ts"
+import { fmtAge } from "../shared/format.ts"
+import type { QuotaData, QuotaItem, QuotaStatus } from "./types.ts"
 
 // 网络刷新最小间隔：额度接口按次计费/限流，60s 强刷不划算。
 export const QUOTA_REFRESH_MS = 5 * 60_000
+// 超过这个年龄的缓存视为过期：正常 5min 刷新下不会发生，说明刷新连续失败或进程被挂起。
+export const QUOTA_STALE_MS = 2 * QUOTA_REFRESH_MS
 // UI 侧检查心跳：每分钟看一次凭据与退避，真正是否发请求由上面的间隔决定。
 export const QUOTA_TICK_MS = 60_000
 const BACKOFF_BASE_MS = 5 * 60_000
@@ -37,6 +40,8 @@ type Entry = {
   data?: QuotaData
   /** 上次尝试结束的时刻；没有表示这个凭据还没请求过。 */
   at?: number
+  /** 上次成功写入数据的时刻（新鲜度只看它，不看失败尝试）。 */
+  updatedAt?: number
   failures: number
   retryAt?: number
   error?: QuotaErrorState
@@ -93,6 +98,36 @@ export class QuotaStore {
   // 最近一次请求失败的结构化原因（未失败/已恢复 → undefined）
   error(pid: string): QuotaErrorState | undefined {
     return this.entries.get(pid)?.error
+  }
+
+  // 展示层新鲜度：只读快照，不触发请求。
+  // phase 与 error 都来自同一条 entry，因此「有缓存 + 刷新失败」会同时给出 data 与 error。
+  status(pid: string, now: number = this.now()): QuotaStatus {
+    const entry = this.entries.get(pid)
+    const hasData = entry?.data !== undefined
+    const ageMs =
+      entry?.updatedAt === undefined ? undefined : Math.max(0, now - entry.updatedAt)
+    const stale = hasData && ageMs !== undefined && ageMs > QUOTA_STALE_MS
+    const fetching = this.inFlight.has(pid)
+    const phase = hasData
+      ? entry?.error
+        ? "error"
+        : stale
+          ? "stale"
+          : "ready"
+      : fetching
+        ? "loading"
+        : entry?.error
+          ? "error"
+          : "empty"
+    return {
+      phase,
+      hasData,
+      fetching,
+      ...(ageMs === undefined ? {} : { ageMs }),
+      stale,
+      ...(entry?.error === undefined ? {} : { error: entry.error }),
+    }
   }
 
   // 订阅数据变更（仅在缓存真正变化时通知）；返回退订函数（组件 onCleanup 调用）
@@ -167,7 +202,8 @@ export class QuotaStore {
         // 请求期间切了凭据：这是旧账号的结果，丢弃，不覆盖新桶。
         if (!current || current.fingerprint !== fingerprint) return false
         if (usage) {
-          this.entries.set(pid, { fingerprint, data: usage, at: this.now(), failures: 0 })
+          const at = this.now()
+          this.entries.set(pid, { fingerprint, data: usage, at, updatedAt: at, failures: 0 })
           this.bump() // 写库即通知订阅者（当前组件刷新，跨组件重建安全）
           return true
         }
@@ -183,6 +219,7 @@ export class QuotaStore {
         this.entries.set(pid, {
           fingerprint,
           ...(current.data === undefined ? {} : { data: current.data }),
+          ...(current.updatedAt === undefined ? {} : { updatedAt: current.updatedAt }),
           at: this.now(),
           failures: current.failures + 1,
           ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
@@ -265,4 +302,52 @@ export function toggleQuotaRowState(
   const next = new Map(state)
   next.set(pid, !isQuotaRowOpen(pid, defaultPid, state))
   return next
+}
+
+// ─── 新鲜度（展示元信息，纯函数） ───
+
+// 失败原因 → 短标签：只给「能不能用 / 该不该重试」的判断，
+// 详细文本（已脱敏）留在 error.message 里，供应用内 console 排查。
+export function quotaErrorLabel(error: { code?: string } | undefined): string | undefined {
+  if (!error) return
+  switch (error.code) {
+    case "login_expired":
+      return "凭据失效"
+    case "rate_limited":
+      return "限流"
+    case "timeout":
+      return "超时"
+    case "network":
+      return "网络异常"
+    case "bad_response":
+      return "响应异常"
+    case "provider_error":
+      return "查询失败"
+    default:
+      return "查询失败"
+  }
+}
+
+export type QuotaTrailTone = "muted" | "accent" | "danger"
+export type QuotaTrail = { text: string; tone: QuotaTrailTone }
+
+// 组头右端的状态注记（摘要文本由 UI 自己拼在后面）：
+//   展开 → 更新中 / 失败原因 / 数据年龄（过期转琥珀）
+//   折叠 → 失败 / 旧（没有这些状态时不占位，折叠行右端留给摘要）
+// 没有任何可说的状态 → undefined（不让「刚刷新过」这种常态占宽）。
+export function quotaStatusTrail(status: QuotaStatus, open: boolean): QuotaTrail | undefined {
+  // 折叠行只给异常前缀：后台刷新是常态，为「更新中」挤掉摘要/重置时间不划算
+  if (!open) {
+    if (status.error) return { text: "失败", tone: "danger" }
+    if (status.stale) return { text: "旧", tone: "accent" }
+    return undefined
+  }
+  if (status.fetching) return { text: "更新中", tone: "accent" }
+  if (status.error && status.hasData) {
+    const label = quotaErrorLabel(status.error) ?? "查询失败"
+    const age = fmtAge(status.ageMs)
+    return { text: age ? `${label} ${age}` : label, tone: "danger" }
+  }
+  if (status.ageMs === undefined) return undefined
+  return { text: fmtAge(status.ageMs), tone: status.stale ? "accent" : "muted" }
 }
