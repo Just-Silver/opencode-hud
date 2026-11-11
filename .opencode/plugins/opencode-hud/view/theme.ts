@@ -35,11 +35,11 @@ export function contextColor(pct: number | undefined): string {
   return ACCENT_COLOR
 }
 
-// 「已用占比」的语义色：低占用是中性灰（不暗示成功），中段警告，高档危险。
-// 用于额度条目与折叠摘要——绿色的「成功」含义留给真实正常状态，不铺给所有百分比。
+// 「已用占比」的语义色：低占用是绿色（订阅还宽裕），中段警告，高档危险。
+// 用于额度条目与折叠摘要。
 export function usageColor(pct: number | undefined): string {
   if (pct === undefined) return MUTED_COLOR
   if (pct >= PCT_ERROR_THRESHOLD) return ERROR_COLOR
   if (pct >= PCT_WARN_THRESHOLD) return WARNING_COLOR
-  return SECONDARY_COLOR
+  return SUCCESS_COLOR
 }
