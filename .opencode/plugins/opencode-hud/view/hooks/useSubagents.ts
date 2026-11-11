@@ -1,5 +1,5 @@
 // ─── ViewModel 片段：子代理列表 ───
-// 结构数据来自 SessionInfo（宿主聚合列）；首字/速度只对展开条目按需读子会话消息。
+// 结构数据来自 SessionInfo（宿主聚合列）；首字/速度只对「展开中 或 运行中」的条目按需读子会话消息。
 // 心跳策略：仅存在运行中条目时开两条 interval（80ms 动画帧 / 1s 耗时），全 idle 立即停。
 import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { usePlugin } from "@opencode/plugin/tui"
@@ -21,26 +21,37 @@ export function useSubagents(sessionID: string | undefined) {
     return family.filter((id: string) => id !== sessionID)
   })
 
-  // 只对已展开的条目读子会话消息：未展开的条目不产生任何请求。
+  // 需要读子会话消息的条目：已展开的 ∪ 运行中的。
+  // 运行中条目要在常驻行显示首字/速度，所以不能只按展开态取消息。
+  // 逐秒重算，但内容相等时复用上一轮数组引用，避免下游 perf/effect 每秒重跑一边。
+  const perfTargets = createMemo<string[]>(
+    () => {
+      void subTick()
+      const state = expanded()
+      const out: string[] = []
+      for (const id of subagentIds()) {
+        if (state[id] === true || ctx.data.session.status(id) === "running") out.push(id)
+      }
+      return out
+    },
+    undefined,
+    { equals: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]) },
+  )
+
+  // 只对需要展示性能的条目读子会话消息：其余条目（未展开且已结束）不产生任何请求。
   // 不读 subTick —— 性能只在步结束写回 store 时变，不跟 1s 耗时心跳重算。
   const subagentPerf = createMemo<Record<string, { ttftMs?: number; tps?: number }>>(() => {
-    const state = expanded()
     const out: Record<string, { ttftMs?: number; tps?: number }> = {}
-    for (const id of Object.keys(state)) {
-      if (state[id] !== true) continue
+    for (const id of perfTargets()) {
       out[id] = latestPerf((ctx.data.session.message.list(id) ?? []) as PerfMessage[])
     }
     return out
   })
 
-  // 展开时才补一次子会话消息（宿主只给当前会话/标签页自动同步消息）。
-  // sync.run 成功后同 key 短路；失败静默，下次重新展开再试。
+  // 展开 / 运行中时补一次子会话消息（宿主只给当前会话/标签页自动同步消息）。
+  // sync.run 成功后同 key 短路；失败静默，下次重算再试。
   createEffect(() => {
-    const state = expanded()
-    for (const id of Object.keys(state)) {
-      if (state[id] !== true) continue
-      void ctx.data.session.message.sync(id).catch(() => {})
-    }
+    for (const id of perfTargets()) void ctx.data.session.message.sync(id).catch(() => {})
   })
 
   // 耗时高水位：跨 memo 重算保留，避免步骤边界的 idle 旧值把分钟数拉回去

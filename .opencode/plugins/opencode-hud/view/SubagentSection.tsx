@@ -95,14 +95,15 @@ function Details(props: { row: SubagentRow }): JSX.Element {
       <Show when={props.row.cacheRate !== undefined}>
         <DetailRow label="命中" value={fmtPct(props.row.cacheRate)} />
       </Show>
-      <Show when={fmtPerf(props.row.ttftMs, props.row.tps)}>
+      {/* 运行中条目的首字/速度已在常驻行显示，详情不再重复；已停止条目靠这一行补充 */}
+      <Show when={props.row.running ? "" : fmtPerf(props.row.ttftMs, props.row.tps)}>
         {(text) => <DetailRow label="性能" value={text()} />}
       </Show>
     </box>
   )
 }
 
-// 运行中：抬升底色的两行任务卡，左侧琥珀强调线
+// 运行中：抬升底色的三行任务卡（标题 / 耗时·消耗 / 首字·速度），左侧琥珀强调线
 function RunningRow(props: { row: SubagentRow; frame: number; onToggle: () => void }): JSX.Element {
   return (
     <box
@@ -126,6 +127,14 @@ function RunningRow(props: { row: SubagentRow; frame: number; onToggle: () => vo
           {`${fmtElapsed(props.row.elapsedMs)} · ${fmtTokens(props.row.tokens)}`}
         </text>
       </box>
+      {/* 首字/速度：还没有可算样本时整行不渲染（不画空行、不显示占位） */}
+      <Show when={fmtPerf(props.row.ttftMs, props.row.tps)}>
+        {(text) => (
+          <box flexDirection="row" height={1} onMouseDown={props.onToggle}>
+            <text fg={SECONDARY_COLOR} wrapMode="none">{text()}</text>
+          </box>
+        )}
+      </Show>
       <Show when={props.row.expanded}>
         <Details row={props.row} />
       </Show>
