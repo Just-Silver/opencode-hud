@@ -157,23 +157,34 @@ function StoppedRow(props: { row: SubagentRow; onToggle: () => void }): JSX.Elem
   )
 }
 
-// 卡片头计数：● N 运行中  N 已停止  N 失败（各取所需，不合并语义）
-function Counts(props: { counts: { running: number; stopped: number; failed: number } }): JSX.Element {
+// 卡片头：左「● N 运行中  N 已停止  N 失败」/ 右「合计 X」（各取所需，不合并语义）。
+// 计数区可收缩（flexShrink + minWidth 0）：33 列塞不下时先裁计数，合计始终可见。
+function Counts(props: {
+  counts: { running: number; stopped: number; failed: number }
+  total?: string
+}): JSX.Element {
   return (
     <box flexDirection="row" height={1}>
-      <Show when={props.counts.running > 0}>
-        <text fg={SUCCESS_COLOR}>{`● ${props.counts.running} 运行中`}</text>
-      </Show>
-      <Show when={props.counts.running > 0 && props.counts.stopped > 0}>
-        <text> </text>
-      </Show>
-      <Show when={props.counts.stopped > 0}>
-        <text fg={SECONDARY_COLOR}>{`${props.counts.stopped} 已停止`}</text>
-      </Show>
-      <Show when={props.counts.failed > 0}>
-        <text fg={ERROR_COLOR}>{`  ${props.counts.failed} 失败`}</text>
-      </Show>
+      <box flexDirection="row" flexShrink={1} minWidth={0}>
+        <Show when={props.counts.running > 0}>
+          <text fg={SUCCESS_COLOR} wrapMode="none">{`● ${props.counts.running} 运行中`}</text>
+        </Show>
+        <Show when={props.counts.running > 0 && props.counts.stopped > 0}>
+          <text> </text>
+        </Show>
+        <Show when={props.counts.stopped > 0}>
+          <text fg={SECONDARY_COLOR} wrapMode="none">{`${props.counts.stopped} 已停止`}</text>
+        </Show>
+        <Show when={props.counts.failed > 0}>
+          <text fg={ERROR_COLOR} wrapMode="none">{`  ${props.counts.failed} 失败`}</text>
+        </Show>
+      </box>
       <box flexGrow={1} />
+      <Show when={props.total}>
+        <text fg={MUTED_COLOR} wrapMode="none">合计</text>
+        <text> </text>
+        <text fg={SECONDARY_COLOR} wrapMode="none">{props.total}</text>
+      </Show>
     </box>
   )
 }
@@ -200,7 +211,7 @@ export function SubagentSection(props: {
   return (
     <Show when={props.rows.length > 0}>
       <DashboardCard title={SECTION_SUBAGENT_TITLE}>
-        <Counts counts={counts()} />
+        <Counts counts={counts()} total={total()} />
 
         <box flexDirection="column">
           {/* Index 按位置复用节点：For 按引用比较，每秒重算的新对象会让整行销毁重建，
@@ -236,10 +247,10 @@ export function SubagentSection(props: {
           </Show>
         </box>
 
-        {/* 表尾：收起全部（仅在有展开项时可点）+ 合计消耗（始终显示）。
-            不要加 paddingTop：height=1 会把这一行压成一行空行（内容被裁掉），合计反而看不见。 */}
-        <box flexDirection="row" height={1}>
-          <Show when={anythingExpanded()}>
+        {/* 表尾只留「收起」：合计已上移到卡片头右端，无展开项时整行不渲染。
+            不要加 paddingTop：height=1 会把这一行压成一行空行（内容被裁掉）。 */}
+        <Show when={anythingExpanded()}>
+          <box flexDirection="row" height={1}>
             <text
               fg={TEXT_COLOR}
               onMouseDown={(event: { stopPropagation(): void }) => {
@@ -250,14 +261,9 @@ export function SubagentSection(props: {
             >
               {"收起"}
             </text>
-          </Show>
-          <box flexGrow={1} />
-          <Show when={total()}>
-            <text fg={MUTED_COLOR}>{"合计"}</text>
-            <text> </text>
-            <text fg={SECONDARY_COLOR}>{total()}</text>
-          </Show>
-        </box>
+            <box flexGrow={1} />
+          </box>
+        </Show>
       </DashboardCard>
     </Show>
   )
