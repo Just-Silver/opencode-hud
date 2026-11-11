@@ -64,7 +64,10 @@ export function QuotaSection(props: { rows: QuotaRow[]; onToggle: (pid: string) 
     // 空列表 → 整个额度区块不渲染（没有可用额度数据即隐藏，不留「无数据」占位）
     <Show when={props.rows.length > 0}>
       <Collapsible title={SECTION_QUOTA_TITLE} summary={summary()}>
-        <Index each={props.rows}>{(row) => <QuotaGroup row={row()} onToggle={props.onToggle} />}</Index>
+        {/* 紧凑排布：组头 / 条目 / 下一组紧邻，不插空行（42 列侧栏优先保证信息密度） */}
+        <box flexDirection="column">
+          <Index each={props.rows}>{(row) => <QuotaGroup row={row()} onToggle={props.onToggle} />}</Index>
+        </box>
       </Collapsible>
     </Show>
   )

@@ -40,7 +40,7 @@ export function BarsRenderer(props: { items: QuotaItem[] }): JSX.Element {
   const hintWidth = () => props.items.reduce((w, it) => Math.max(w, visualWidth(it.hint ?? "")), 0)
   const showHint = () => hintWidth() > 0
   return (
-    <box flexDirection="column" gap={1}>
+    <box flexDirection="column">
       <For each={props.items}>
         {(item) => <RendererRow item={item} hintWidth={hintWidth()} showHint={showHint()} />}
       </For>

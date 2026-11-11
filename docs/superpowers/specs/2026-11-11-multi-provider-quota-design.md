@@ -116,6 +116,7 @@ orderQuotaProviders(opts: {
 - 展开行：直接复用该供应商的渲染器（`resolveRenderer(getProviderRenderer(pid))`），不改渲染器契约。
 - 命名：当前会话供应商的组头用 `PRIMARY_COLOR`，其余用 `TEXT_COLOR`；箭头与摘要用 `MUTED_COLOR`；百分比颜色走 `pctColor`。
 - 行列表用 `<Index>`（数据随 store 写库周期重算，避免 `<For>` 按引用销毁重建）。
+- 垂直节奏：**全紧凑，不插空行** —— 组头 / 条目 / 下一组紧邻；`bars` 渲染器容器与分组盒子都不带 `gap`（42 列侧栏优先信息密度）。
 - 整个额度块仍由「至少一行有数据」门控；全无 → 不渲染（含标题）。
 
 ### 3.6 数据加载
