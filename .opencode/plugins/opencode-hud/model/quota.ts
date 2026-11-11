@@ -1,7 +1,8 @@
 // ─── 模型层：额度查询状态机（凭据分桶 + 刷新/退避 + 并发去重 + 写库订阅通知，依赖注入可单测） ───
 import { createHash } from "node:crypto"
 import { QuotaRequestError, redactSecrets, type QuotaErrorCode } from "../shared/http.ts"
-import type { QuotaData } from "./types.ts"
+import { normID } from "../shared/id.ts"
+import type { QuotaData, QuotaItem } from "./types.ts"
 
 // 网络刷新最小间隔：额度接口按次计费/限流，60s 强刷不划算。
 export const QUOTA_REFRESH_MS = 5 * 60_000
@@ -202,4 +203,56 @@ let singleton: QuotaStore | undefined
 export function getQuotaStore(deps: QuotaDeps): QuotaStore {
   if (!singleton) singleton = new QuotaStore(deps)
   return singleton
+}
+
+// ─── 多订阅展示（纯函数，node 可测） ───
+export type QuotaOrderInput = {
+  current: string | undefined
+  subagentPids: readonly string[]
+  available: readonly string[]
+}
+
+// 顺序：当前会话 → 本会话运行中子代理在用 → 其余候选（发现顺序）。
+// 当前会话供应商即使不在候选里也保留：它仍走原来的按需加载路径，不依赖凭据探测。
+export function orderQuotaProviders(input: QuotaOrderInput): string[] {
+  // 归一化 → 规范写法（候选里的原始 pid）；同一供应商多种写法只留第一次出现的
+  const canonical = new Map<string, string>()
+  for (const pid of input.available) {
+    const key = normID(pid)
+    if (!canonical.has(key)) canonical.set(key, pid)
+  }
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (raw: string) => {
+    const key = normID(raw)
+    if (key === "" || seen.has(key)) return
+    const hit = canonical.get(key)
+    if (hit === undefined && raw !== input.current) return // 不在候选里，也不是当前会话 → 丢弃
+    seen.add(key)
+    out.push(hit ?? raw)
+  }
+  if (input.current) push(input.current)
+  for (const pid of input.subagentPids) push(pid)
+  for (const pid of input.available) push(pid)
+  return out
+}
+
+// 折叠行摘要：已用最多（最紧张）的一条；并列取先出现；无百分比取首个有文本的；空 → undefined
+export function representativeItem(items: readonly QuotaItem[]): QuotaItem | undefined {
+  let best: QuotaItem | undefined
+  for (const item of items) {
+    if (typeof item.percent !== "number") continue
+    if (best === undefined || item.percent > (best.percent ?? 0)) best = item
+  }
+  if (best !== undefined) return best
+  return items.find((item) => typeof item.text === "string" && item.text.length > 0)
+}
+
+// 展开态：显式记录优先，否则只有默认行展开
+export function isQuotaRowOpen(
+  pid: string,
+  defaultPid: string | undefined,
+  state: ReadonlyMap<string, boolean>,
+): boolean {
+  return state.get(pid) ?? pid === defaultPid
 }

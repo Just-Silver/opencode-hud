@@ -5,6 +5,11 @@ import assert from "node:assert/strict"
 import { fileURLToPath } from "node:url"
 import { dirname, join } from "node:path"
 import { createRegistry, type ProviderRegistration } from "../.opencode/plugins/opencode-hud/quota/registry.ts"
+import {
+  isQuotaRowOpen,
+  orderQuotaProviders,
+  representativeItem,
+} from "../.opencode/plugins/opencode-hud/model/quota.ts"
 import { QUOTA_API_URL } from "../.opencode/plugins/opencode-hud/quota/providers/opencode-go.ts"
 import { resolveApiKeyFromConfig } from "../.opencode/plugins/opencode-hud/quota/key.ts"
 
@@ -103,4 +108,63 @@ test("listProviders：只返回启用项，省略 name 时回退 id；getProvide
   assert.deepEqual(reg.listProviders(), [{ id: "opencode-go", name: "opencode-go" }])
   assert.equal(reg.getProviderName("opencode-go"), "opencode-go")
   assert.equal(reg.getProviderName("command-code"), undefined)
+})
+
+// ─── 多订阅展示的纯函数 ───
+test("orderQuotaProviders：当前 → 子代理在用 → 其余注册顺序，按归一化去重", () => {
+  assert.deepEqual(
+    orderQuotaProviders({
+      current: "opencode_go",
+      subagentPids: ["OpenAI"],
+      available: ["command-code", "openai", "opencode-go"],
+    }),
+    ["opencode-go", "openai", "command-code"],
+  )
+})
+
+test("orderQuotaProviders：当前不在候选里也保留（仍走原有加载路径）", () => {
+  assert.deepEqual(
+    orderQuotaProviders({ current: "open-design", subagentPids: [], available: ["openai"] }),
+    ["open-design", "openai"],
+  )
+})
+
+test("orderQuotaProviders：子代理供应商不在候选 / 重复 / 为空 → 忽略", () => {
+  assert.deepEqual(
+    orderQuotaProviders({
+      current: undefined,
+      subagentPids: ["anthropic", "OpenAI", "openai"],
+      available: ["openai", "command-code"],
+    }),
+    ["openai", "command-code"],
+  )
+})
+
+test("representativeItem：取已用最多的条目，并列取先出现", () => {
+  assert.deepEqual(representativeItem([{ label: "5h", percent: 12 }, { label: "周", percent: 69 }]), {
+    label: "周",
+    percent: 69,
+  })
+  assert.deepEqual(representativeItem([{ label: "a", percent: 50 }, { label: "b", percent: 50 }]), {
+    label: "a",
+    percent: 50,
+  })
+})
+
+test("representativeItem：全无百分比取首个有文本的；空数组 undefined", () => {
+  assert.deepEqual(representativeItem([{ label: "x" }, { label: "余额", text: "$12.3" }]), {
+    label: "余额",
+    text: "$12.3",
+  })
+  assert.equal(representativeItem([]), undefined)
+})
+
+test("isQuotaRowOpen：无记录按默认行，显式记录优先", () => {
+  const state = new Map<string, boolean>()
+  assert.equal(isQuotaRowOpen("a", "a", state), true)
+  assert.equal(isQuotaRowOpen("b", "a", state), false)
+  state.set("b", true)
+  state.set("a", false)
+  assert.equal(isQuotaRowOpen("b", "a", state), true)
+  assert.equal(isQuotaRowOpen("a", "a", state), false)
 })
