@@ -134,11 +134,10 @@ test("订阅：写库触发监听器（成功路径 bump 一次）", async () =>
   assert.equal(notified, 1)
 })
 
-test("订阅：失败/空响应/missing key 不触发监听器", async () => {
+test("订阅：请求失败或空响应也在落定时通知一次（「更新中」必须能立即撤销）", async () => {
   const cases: Array<Partial<QuotaDeps>> = [
     { fetch: async () => { throw new Error("boom") } },
     { fetch: async () => undefined },
-    { resolveKey: async () => undefined },
   ]
   for (const overrides of cases) {
     const deps = makeDeps(overrides)
@@ -146,8 +145,17 @@ test("订阅：失败/空响应/missing key 不触发监听器", async () => {
     let notified = 0
     store.subscribe(() => notified++)
     await store.load("opencode-go")
-    assert.equal(notified, 0, `不应通知: ${JSON.stringify(Object.keys(overrides))}`)
+    assert.equal(notified, 1, `应通知一次: ${JSON.stringify(Object.keys(overrides))}`)
   }
+})
+
+test("订阅：missing key 既不请求也不通知", async () => {
+  const deps = makeDeps({ resolveKey: async () => undefined })
+  const store = new QuotaStore(deps)
+  let notified = 0
+  store.subscribe(() => notified++)
+  await store.load("opencode-go")
+  assert.equal(notified, 0)
 })
 
 test("订阅：退订后不再通知", async () => {

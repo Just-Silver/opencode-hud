@@ -167,10 +167,13 @@ function StoppedRow(props: { row: SubagentRow; onToggle: () => void }): JSX.Elem
 }
 
 // 卡片头：左「● N 运行中  N 已停止  N 失败」/ 右「合计 X」（各取所需，不合并语义）。
-// 计数区可收缩（flexShrink + minWidth 0）：33 列塞不下时先裁计数，合计始终可见。
+// 计数区可收缩（flexShrink + minWidth 0）：33 列塞不下时先裁计数，右端信息始终可见。
 function Counts(props: {
   counts: { running: number; stopped: number; failed: number }
   total?: string
+  /** 有逐条展开或历史段全展开 */
+  canCollapse: boolean
+  onCollapse: () => void
 }): JSX.Element {
   return (
     <box flexDirection="row" height={1}>
@@ -189,10 +192,28 @@ function Counts(props: {
         </Show>
       </box>
       <box flexGrow={1} />
-      <Show when={props.total}>
-        <text fg={MUTED_COLOR} wrapMode="none">合计</text>
-        <text> </text>
-        <text fg={SECONDARY_COLOR} wrapMode="none">{props.total}</text>
+      {/* 收起固定在卡片头：列表展开后其尾部可以很长，控件放表尾就得先滚到底。
+          展开是临时态，此时右端让位给「收起」——两者同占 33 列会把计数裁掉。 */}
+      <Show
+        when={props.canCollapse}
+        fallback={
+          <Show when={props.total}>
+            <text fg={MUTED_COLOR} wrapMode="none">合计</text>
+            <text> </text>
+            <text fg={SECONDARY_COLOR} wrapMode="none">{props.total}</text>
+          </Show>
+        }
+      >
+        <text
+          fg={TEXT_COLOR}
+          wrapMode="none"
+          onMouseDown={(event: { stopPropagation(): void }) => {
+            event.stopPropagation()
+            props.onCollapse()
+          }}
+        >
+          {"收起"}
+        </text>
       </Show>
     </box>
   )
@@ -220,7 +241,15 @@ export function SubagentSection(props: {
   return (
     <Show when={props.rows.length > 0}>
       <DashboardCard title={SECTION_SUBAGENT_TITLE}>
-        <Counts counts={counts()} total={total()} />
+        <Counts
+          counts={counts()}
+          total={total()}
+          canCollapse={anythingExpanded()}
+          onCollapse={() => {
+            setShowAllDone(false)
+            props.onCollapseAll()
+          }}
+        />
 
         <box flexDirection="column">
           {/* Index 按位置复用节点：For 按引用比较，每秒重算的新对象会让整行销毁重建，
@@ -255,24 +284,6 @@ export function SubagentSection(props: {
             </Show>
           </Show>
         </box>
-
-        {/* 表尾只留「收起」：合计已上移到卡片头右端，无展开项时整行不渲染。
-            不要加 paddingTop：height=1 会把这一行压成一行空行（内容被裁掉）。 */}
-        <Show when={anythingExpanded()}>
-          <box flexDirection="row" height={1}>
-            <text
-              fg={TEXT_COLOR}
-              onMouseDown={(event: { stopPropagation(): void }) => {
-                event.stopPropagation()
-                setShowAllDone(false)
-                props.onCollapseAll()
-              }}
-            >
-              {"收起"}
-            </text>
-            <box flexGrow={1} />
-          </box>
-        </Show>
       </DashboardCard>
     </Show>
   )

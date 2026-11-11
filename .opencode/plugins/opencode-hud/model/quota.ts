@@ -204,7 +204,6 @@ export class QuotaStore {
         if (usage) {
           const at = this.now()
           this.entries.set(pid, { fingerprint, data: usage, at, updatedAt: at, failures: 0 })
-          this.bump() // 写库即通知订阅者（当前组件刷新，跨组件重建安全）
           return true
         }
         current.at = this.now()
@@ -228,7 +227,12 @@ export class QuotaStore {
         this.deps.log("error", `quota ${pid} fetch failed: ${error.message}`)
         return false
       }
-    })().finally(() => this.inFlight.delete(pid))
+    })().finally(() => {
+      // 先清在途标记再通知：展示层的 fetching 直接读 inFlight，
+      // 在清掉之前通知会把界面钉在「有数据 + 仍在途」的快照上（「更新中」要等下一次心跳才撤）。
+      this.inFlight.delete(pid)
+      this.bump()
+    })
     this.inFlight.set(pid, p)
     return p
   }
