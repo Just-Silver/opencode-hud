@@ -15,6 +15,7 @@ import type { PerfMessage } from "../.opencode/plugins/opencode-hud/model/types.
 import {
   buildRow,
   clampElapsed,
+  runningProviderIDs,
   SPINNER_FRAMES,
   sortRows,
   statusGlyph,
@@ -321,4 +322,18 @@ test("visibleRows：运行中条数超过上限时也全部保留（复用的老
   const { head, tail } = visibleRows(rows, 1)
   assert.deepEqual(head.map((r) => r.id), ["run-a", "run-b", "run-c", "done-new"])
   assert.deepEqual(tail.map((r) => r.id), ["done-old"])
+})
+
+test("runningProviderIDs：只取运行中子代理的供应商，保持顺序", () => {
+  const infos: Record<string, { model?: { providerID?: string } }> = {
+    s1: { model: { providerID: "openai" } },
+    s2: { model: { providerID: "command-code" } },
+    s3: { model: { providerID: "opencode-go" } },
+    s4: {},
+  }
+  const status: Record<string, string> = { s1: "running", s2: "idle", s3: "running", s4: "running" }
+  assert.deepEqual(
+    runningProviderIDs(["s1", "s2", "s3", "s4"], (id) => status[id], (id) => infos[id]),
+    ["openai", "opencode-go"],
+  )
 })

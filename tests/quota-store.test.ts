@@ -49,17 +49,16 @@ test("load missing key：记 warn、不写缓存、返回 false", async () => {
   assert.deepEqual(deps.logs, [{ level: "warn", message: "quota opencode-go missing key" }])
 })
 
-test("没凭据：warn 按刷新间隔节流，60s 心跳不重复刷屏", async () => {
+test("没凭据：同一凭据状态下只记一次 warn，60s 心跳不刷屏", async () => {
   let now = 1_000_000
   const deps = makeDeps({ resolveKey: async () => undefined, now: () => now })
   const store = new QuotaStore(deps)
-  await store.load("opencode-go")
-  now += 60_000
-  await store.load("opencode-go")
-  assert.equal(deps.logs.length, 1) // 心跳期内不再记
-  now += QUOTA_REFRESH_MS
-  await store.load("opencode-go")
-  assert.equal(deps.logs.length, 2) // 过了刷新间隔才再记一次
+  for (let tick = 0; tick < 30; tick++) {
+    await store.load("opencode-go") // 30 次心跳 = 30 分钟
+    now += 60_000
+  }
+  assert.equal(deps.logs.length, 1)
+  assert.deepEqual(deps.logs[0], { level: "warn", message: "quota opencode-go missing key" })
 })
 
 test("未注册额度端点：静默跳过，不发请求、不写缓存、不记日志", async () => {

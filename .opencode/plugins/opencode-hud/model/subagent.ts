@@ -159,3 +159,18 @@ export function statusGlyph(running: boolean, frame: number): string {
   const i = Math.abs(Math.trunc(frame)) % SPINNER_FRAMES.length
   return SPINNER_FRAMES[i]
 }
+
+// 运行中子代理的供应商：只算「现在正在烧额度」的，family() 里的历史条目不参与
+export function runningProviderIDs(
+  ids: readonly string[],
+  statusOf: (id: string) => string | undefined,
+  infoOf: (id: string) => SubagentInfo | undefined,
+): string[] {
+  const out: string[] = []
+  for (const id of ids) {
+    if (statusOf(id) !== "running") continue
+    const pid = infoOf(id)?.model?.providerID
+    if (typeof pid === "string" && pid.length > 0) out.push(pid)
+  }
+  return out
+}

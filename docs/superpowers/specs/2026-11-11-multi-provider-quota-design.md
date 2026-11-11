@@ -112,7 +112,7 @@ orderQuotaProviders(opts: {
 ```
 
 - 组头：`▾ ` / `▸ ` + 显示名（超 12 列用 `truncateVisual` 截断）；**仅在折叠时**右端显示摘要（展开时有明细行，不重复）。
-- 整块标题沿用 `Collapsible` 的既有语义：**只有整块折叠时**才在标题右端显示摘要，取**排序第一行**的前两条有百分比的条目。第一行就是当前会话供应商时保持现状 `（5h 36% · 周 69%）`；不是（当前会话没有额度查询）时带上供应商名 `（OpenCode Go 5h 36% · 周 69%）`，否则无法判断说的是谁。第一行没有百分比条目则不显示。`QuotaSection` 内部从 `rows[0]` 算，不额外加入参。
+- 整块标题沿用 `Collapsible` 的既有语义：**只有整块折叠时**才在标题右端显示摘要，取**排序第一行**的前两条有百分比的条目。第一行就是当前会话供应商时保持现状 `（5h 36% · 周 69%）`；不是（当前会话没有额度查询）时带上供应商名 `（OpenCode Go 5h 36% · 周 69%）`，否则无法判断说的是谁。正文截断到 24 列（标题 6 + 括号 2 + 正文 24 ≤ 34），避免 42 列侧栏里标题换行。第一行没有百分比条目则不显示。`QuotaSection` 内部从 `rows[0]` 算，不额外加入参。
 - 展开行：直接复用该供应商的渲染器（`resolveRenderer(getProviderRenderer(pid))`），不改渲染器契约。
 - 命名：当前会话供应商的组头用 `PRIMARY_COLOR`，其余用 `TEXT_COLOR`；箭头与摘要用 `MUTED_COLOR`；百分比颜色走 `pctColor`。
 - 行列表用 `<Index>`（数据随 store 写库周期重算，避免 `<For>` 按引用销毁重建）。
@@ -151,7 +151,7 @@ export type QuotaRow = {
 | 重写 | `view/QuotaSection.tsx` | 组头 + 展开渲染（入参改 `rows` + `onToggle`） |
 | 修改 | `tests/discovery.test.ts` | `listProviders` / `getProviderName` |
 | 修改 | `tests/quota.test.ts` | 三个纯函数 |
-| 新增 | `docs/design-multi-provider-quota.md`（本文） | — |
+| 新增 | `docs/superpowers/specs/2026-11-11-multi-provider-quota-design.md`（本文） | — |
 | 修改 | `docs/reference-multi-provider-quota.md` | 「待定问题」结案，指向本文 |
 | 修改 | `AGENTS.md` | 额度段补多订阅口径；文档地图登记本文 |
 | 修改 | `README.md` | 一句：显示所有已登录订阅的额度 |

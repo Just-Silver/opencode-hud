@@ -1,7 +1,7 @@
 // ─── shared/ 共享帮助函数单元测试 ───
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { dividerLine, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, quotaPct, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
+import { dividerLine, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, quotaPct, quotaSummaryText, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
 import { normID } from "../.opencode/plugins/opencode-hud/shared/id.ts"
 import { parseJson } from "../.opencode/plugins/opencode-hud/shared/jsonc.ts"
 
@@ -132,4 +132,10 @@ test("fmtResetHint：有值时加 ↻ 前缀，无值/过期 → undefined", () 
   assert.equal(fmtResetHint(undefined, now), undefined)
   assert.equal(fmtResetHint("nope", now), undefined)
   assert.equal(fmtResetHint(new Date(now.getTime() - 1000).toISOString(), now), undefined)
+})
+test("quotaSummaryText：标签 + 百分比/文本，带重置提示时一并显示", () => {
+  assert.equal(quotaSummaryText({ label: "5h", percent: 36, hint: "↻18:07" }), "5h 36% ↻18:07")
+  assert.equal(quotaSummaryText({ label: "周", percent: 69 }), "周 69%")
+  assert.equal(quotaSummaryText({ label: "余额", text: "$12.3" }), "余额 $12.3")
+  assert.equal(quotaSummaryText(undefined), "")
 })

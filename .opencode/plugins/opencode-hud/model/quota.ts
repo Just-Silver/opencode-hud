@@ -133,12 +133,11 @@ export class QuotaStore {
     const fingerprint = key ? fingerprintOf(key) : ""
     const entry = this.adopt(pid, fingerprint)
     if (!key) {
-      // 没凭据是常态（没登录 / 未连接），日志按刷新间隔节流，避免心跳每分钟刷一条
-      const now = this.now()
-      const waitMs = entry.failures > 0 ? backoffMs(entry.failures) : QUOTA_REFRESH_MS
-      const due = entry.at === undefined || now - entry.at >= waitMs
-      entry.at = now
-      if (due) this.deps.log("warn", `quota ${pid} missing key`)
+      // 没凭据是常态（没登录 / 未连接）：同一凭据状态下只记一次，心跳不刷屏；
+      // 登录或切号会换桶（fingerprint 变化），之后再丢凭据会重新记一条。
+      const first = entry.at === undefined
+      entry.at = this.now()
+      if (first) this.deps.log("warn", `quota ${pid} missing key`)
       return false
     }
 
@@ -255,4 +254,15 @@ export function isQuotaRowOpen(
   state: ReadonlyMap<string, boolean>,
 ): boolean {
   return state.get(pid) ?? pid === defaultPid
+}
+
+// 点击组头后的新状态：取反「当前可见状态」（默认展开规则参与），返回新 Map 供信号驱动
+export function toggleQuotaRowState(
+  state: ReadonlyMap<string, boolean>,
+  pid: string,
+  defaultPid: string | undefined,
+): Map<string, boolean> {
+  const next = new Map(state)
+  next.set(pid, !isQuotaRowOpen(pid, defaultPid, state))
+  return next
 }

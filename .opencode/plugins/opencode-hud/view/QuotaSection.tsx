@@ -6,38 +6,35 @@
 import { Index, Show, type JSX } from "solid-js"
 import { representativeItem } from "../model/quota.ts"
 import type { QuotaRow } from "../model/types.ts"
-import { fmtPctInt, quotaPct, truncateVisual } from "../shared/format.ts"
+import { fmtPctInt, quotaPct, quotaSummaryText, truncateVisual } from "../shared/format.ts"
 import { Collapsible } from "./Collapsible.tsx"
 import { resolveRenderer } from "./renderers/index.ts"
 import { MUTED_COLOR, pctColor, PRIMARY_COLOR, SECTION_QUOTA_TITLE, TEXT_COLOR } from "./theme.ts"
 
 // 组头名称上限：42 列宽还要给折叠摘要留位置
 const NAME_MAX = 12
-
-// 折叠行摘要：标签 + 已用百分比（或余额等文本）；展开时不显示
-function summaryText(row: QuotaRow): string {
-  if (row.open) return ""
-  const item = representativeItem(row.data.items)
-  if (!item) return ""
-  if (item.percent === undefined) return `${item.label} ${item.text ?? ""}`.trim()
-  return `${item.label} ${fmtPctInt(item.percent)}`
-}
+// 整块折叠摘要的正文上限（标题 6 列 + 括号 2 列 + 正文 ≤ 34 列）
+const SUMMARY_MAX = 24
 
 function QuotaGroup(props: { row: QuotaRow; onToggle: (pid: string) => void }): JSX.Element {
-  // 摘要百分比决定取色；没有百分比（余额/不限）走弱化色
+  // 摘要条目只取一次：百分比取色与摘要文本共用，避免同一轮渲染重复挑选
   const item = () => representativeItem(props.row.data.items)
   const pct = () => quotaPct(item())
+  const name = () => truncateVisual(props.row.name, NAME_MAX)
   return (
     <box flexDirection="column">
       <box flexDirection="row" onMouseDown={() => props.onToggle(props.row.pid)}>
         <text fg={MUTED_COLOR}>{props.row.open ? "▾ " : "▸ "}</text>
-        <text fg={props.row.current ? PRIMARY_COLOR : TEXT_COLOR}>
-          <b>{truncateVisual(props.row.name, NAME_MAX)}</b>
-        </text>
+        {/* 当前会话那组用主色加粗，其余保持正文色；两者用两个 text 节点，避免条件包裹 b 标签 */}
+        <Show when={props.row.current} fallback={<text fg={TEXT_COLOR}>{name()}</text>}>
+          <text fg={PRIMARY_COLOR}>
+            <b>{name()}</b>
+          </text>
+        </Show>
         <box flexGrow={1} />
         <Show when={!props.row.open}>
           <text fg={pct() === undefined ? MUTED_COLOR : pctColor(pct())} wrapMode="none">
-            {summaryText(props.row)}
+            {quotaSummaryText(item())}
           </text>
         </Show>
       </box>
@@ -60,7 +57,7 @@ export function QuotaSection(props: { rows: QuotaRow[]; onToggle: (pid: string) 
       .slice(0, 2)
       .map((it) => `${it.label} ${fmtPctInt(quotaPct(it))}`)
     if (parts.length === 0) return undefined
-    const body = parts.join(" · ")
+    const body = truncateVisual(parts.join(" · "), SUMMARY_MAX)
     return first.current ? `（${body}）` : `（${truncateVisual(first.name, NAME_MAX)} ${body}）`
   }
   return (

@@ -9,6 +9,7 @@ import {
   isQuotaRowOpen,
   orderQuotaProviders,
   representativeItem,
+  toggleQuotaRowState,
 } from "../.opencode/plugins/opencode-hud/model/quota.ts"
 import { QUOTA_API_URL } from "../.opencode/plugins/opencode-hud/quota/providers/opencode-go.ts"
 import { resolveApiKeyFromConfig } from "../.opencode/plugins/opencode-hud/quota/key.ts"
@@ -167,4 +168,23 @@ test("isQuotaRowOpen：无记录按默认行，显式记录优先", () => {
   state.set("a", false)
   assert.equal(isQuotaRowOpen("b", "a", state), true)
   assert.equal(isQuotaRowOpen("a", "a", state), false)
+})
+
+test("toggleQuotaRowState：点默认展开组一次即收起，显式状态与默认规则解耦", () => {
+  let state = new Map<string, boolean>()
+  state = toggleQuotaRowState(state, "a", "a")
+  assert.equal(isQuotaRowOpen("a", "a", state), false) // 默认展开 → 一次点击收起
+  state = toggleQuotaRowState(state, "a", "a")
+  assert.equal(isQuotaRowOpen("a", "a", state), true)
+  const other = toggleQuotaRowState(state, "b", "a")
+  assert.equal(isQuotaRowOpen("b", "a", other), true) // 其余组原本折叠 → 一次点击展开
+  assert.equal(isQuotaRowOpen("a", "a", other), true) // 其它组的状态不被连带修改
+})
+
+test("listProviders：保持注册顺序（发现顺序），不排序", () => {
+  const reg = createRegistry([
+    { id: "b-provider", name: "B", apiUrl: "u", fetch: async () => undefined },
+    { id: "a-provider", name: "A", apiUrl: "u", fetch: async () => undefined },
+  ])
+  assert.deepEqual(reg.listProviders().map((p) => p.id), ["b-provider", "a-provider"])
 })

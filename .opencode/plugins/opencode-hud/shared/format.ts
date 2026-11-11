@@ -169,3 +169,11 @@ export function truncateVisual(s: string, maxCols: number): string {
   }
   return out + "…"
 }
+// 折叠行摘要：标签 + 百分比（或余额文本），有重置提示时一并显示
+// 例："5h 36% ↻18:07" / "余额 $12.3"
+export function quotaSummaryText(item: QuotaItem | undefined): string {
+  if (!item) return ""
+  const value = item.percent === undefined ? (item.text ?? "") : fmtPctInt(item.percent)
+  const head = `${item.label} ${value}`.trim()
+  return item.hint ? `${head} ${item.hint}` : head
+}
