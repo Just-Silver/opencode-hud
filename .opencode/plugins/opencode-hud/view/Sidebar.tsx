@@ -13,13 +13,14 @@ import {
   resolveProviderID,
   usageFromTokens,
 } from "../model/usage.ts"
-import type { PerfMessage, TokenLike } from "../model/types.ts"
+import type { PerfMessage, QuotaRow, TokenLike } from "../model/types.ts"
 import { latestPerf } from "../model/perf.ts"
-import { getQuotaStore, QUOTA_TICK_MS, type QuotaDeps } from "../model/quota.ts"
+import { getQuotaStore, isQuotaRowOpen, orderQuotaProviders, QUOTA_REFRESH_MS, QUOTA_TICK_MS, type QuotaDeps } from "../model/quota.ts"
 import { buildRow, sortRows, SPINNER_INTERVAL_MS, type SubagentRow } from "../model/subagent.ts"
 import { SubagentSection } from "./SubagentSection.tsx"
-import { fetchQuota, getProviderApiUrl, getProviderRenderer, isQuotaProvider } from "../quota/index.ts"
+import { fetchQuota, getProviderApiUrl, getProviderName, getProviderRenderer, isQuotaProvider, listProviders } from "../quota/index.ts"
 import { resolveProviderKey } from "../quota/key.ts"
+import { normID } from "../shared/id.ts"
 import { checkForUpdate, type UpdateInfo } from "../update/index.ts"
 import { QuotaSection } from "./QuotaSection.tsx"
 import { BORDER_COLOR } from "./theme.ts"
@@ -35,6 +36,9 @@ function quotaStore(deps: QuotaDeps) {
 
 // 会话内关闭更新横幅一次即不再打扰（模块级：跨侧边栏重建保持）
 let updateDismissedOnce = false
+
+// 额度组的展开态：模块级，跨侧边栏重建保持（与 Collapsible 的 collapseState 同思路）
+const quotaRowOpen = new Map<string, boolean>()
 
 export function Sidebar(props: { sessionID?: string }): JSX.Element {
   const ctx = usePlugin()
@@ -173,14 +177,77 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
 
   // ── 配额：按 providerID 分桶，字典缓存 ──
   const [quotaVer, setQuotaVer] = createSignal(0)
-  const quota = createMemo(() => {
-    void quotaVer()
-    const pid = providerID()
-    if (!pid) return
-    // 白名单守卫：pid 任意写法，经 isQuotaProvider 归一化匹配（opencode-go / opencodego / opencode_go...）
-    if (!isQuotaProvider(pid)) return
-    return store.get(pid)
+
+  // 候选 = 本机有凭据的已启用供应商；5min TTL 只回答「有没有 token」，能否查额度交给 store 的首次请求
+  const [available, setAvailable] = createSignal<string[]>([])
+  let probedAt = 0
+  let probing = false
+  const probeSubscriptions = async () => {
+    if (probing) return
+    if (probedAt !== 0 && Date.now() - probedAt < QUOTA_REFRESH_MS) return
+    probing = true
+    try {
+      const hits: string[] = []
+      for (const { id } of listProviders()) {
+        const key = await resolveProviderKey(id).catch(() => undefined)
+        if (key) hits.push(id)
+      }
+      probedAt = Date.now()
+      setAvailable(hits)
+    } finally {
+      probing = false
+    }
+  }
+  void probeSubscriptions()
+
+  // 只取运行中的子代理：family() 只增不减，历史条目会把「在用」变成「用过」
+  const subagentProviderIDs = createMemo<string[]>(() => {
+    const out: string[] = []
+    for (const id of subagentIds()) {
+      if (ctx.data.session.status(id) !== "running") continue
+      const pid = (ctx.data.session.get(id) as { model?: { providerID?: string } } | undefined)?.model?.providerID
+      if (typeof pid === "string" && pid.length > 0) out.push(pid)
+    }
+    return out
   })
+
+  // 排序：当前会话 → 运行中子代理在用 → 其余候选（注册顺序）
+  const quotaTargets = createMemo<string[]>(() =>
+    orderQuotaProviders({
+      current: providerID(),
+      subagentPids: subagentProviderIDs(),
+      available: available(),
+    }),
+  )
+
+  const [quotaOpenVer, setQuotaOpenVer] = createSignal(0)
+  const quotaRows = createMemo<QuotaRow[]>(() => {
+    void quotaVer()
+    void quotaOpenVer()
+    const currentPid = providerID()
+    const base = quotaTargets().flatMap((pid) => {
+      const data = store.get(pid)
+      if (!data || data.items.length === 0) return [] // 无数据不出现（含空条目）
+      return [
+        {
+          pid,
+          name: getProviderName(pid) ?? pid,
+          renderer: getProviderRenderer(pid),
+          data,
+          current: currentPid !== undefined && normID(pid) === normID(currentPid),
+        },
+      ]
+    })
+    // 只有当前会话供应商在行集合里时才默认展开它；否则全部折叠（不猜哪条更重要）
+    const defaultPid = base.find((r) => r.current)?.pid
+    return base.map((r) => ({ ...r, open: isQuotaRowOpen(r.pid, defaultPid, quotaRowOpen) }))
+  })
+
+  // 点击组头只把当前可见状态取反：defaultPid 传 undefined，不重新解释「默认行」
+  const toggleQuotaRow = (pid: string) => {
+    quotaRowOpen.set(pid, !isQuotaRowOpen(pid, undefined, quotaRowOpen))
+    setQuotaOpenVer((v) => v + 1)
+  }
 
   // 订阅 store 写库通知：任何组件发起的 load 写库后当前组件都会刷新（跨组件重建安全）
   onCleanup(
@@ -189,17 +256,18 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
     }),
   )
 
-  // effect：会话/数据变化触发首次加载（限流防抖，render 高频重建不连击）
+  // effect：会话/候选变化触发首次加载（store 内部限流，render 高频重建不连击）
   // 只对已注册的额度供应商加载：其他供应商没有查询端点，调用只会产生日志噪音
   const loadQuota = (pid: string | undefined) => {
     if (pid && isQuotaProvider(pid)) void store.load(pid)
   }
   createEffect(() => {
-    loadQuota(providerID())
+    for (const pid of quotaTargets()) loadQuota(pid)
   })
-  // timer：每 60s 检查一次（凭据/退避）；是否符合网络刷新间隔由 store 判断
+  // timer：每 60s 检查一次（探测凭据/逐供应商刷新）；是否符合网络刷新间隔由 store 判断
   const timer = setInterval(() => {
-    loadQuota(providerID())
+    void probeSubscriptions() // 5min TTL 内直接返回
+    for (const pid of quotaTargets()) loadQuota(pid)
   }, QUOTA_TICK_MS)
   onCleanup(() => clearInterval(timer))
 
@@ -243,7 +311,7 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
                 limit={limit()}
                 cacheRate={cacheRate()}
               />
-              <QuotaSection quota={quota()} renderer={getProviderRenderer(providerID() ?? "")} />
+              <QuotaSection rows={quotaRows()} onToggle={toggleQuotaRow} />
               <SubagentSection
                 rows={subagentRows()}
                 frame={spinnerFrame()}

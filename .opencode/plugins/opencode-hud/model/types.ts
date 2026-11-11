@@ -14,6 +14,16 @@ export type QuotaItem = {
 // 供应商额度数据（fetcher 输出 / UI 输入）：items 顺序即渲染顺序；空数组 → 不显示额度区块
 export type QuotaData = { items: QuotaItem[] }
 
+// 额度区块的一行「供应商组」：data 来自 store，open/current 由 Sidebar 计算
+export type QuotaRow = {
+  pid: string
+  name: string
+  renderer?: string
+  data: QuotaData
+  current: boolean
+  open: boolean
+}
+
 // 会话用量聚合
 export type UsageData = {
   input: number
