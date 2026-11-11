@@ -1,7 +1,9 @@
 // ─── UI 层：调色板与颜色判定（OpenCode Native Pro） ───
 // 中性黑灰为主、琥珀强调、少量功能性色彩；固定暗色，不跟随 ctx.theme（观感稳定）。
 // 分层：canvas（面板底）→ card（卡片底）→ raised（指标块/运行中任务）。
-// 颜色纪律：琥珀只给品牌强调与上下文主指标；绿/红只表达真实状态；百分比不要一律涂绿。
+// 颜色纪律：琥珀只给品牌强调与上下文主指标；绿色表示运行中 / 成功 / 低占用；
+// 同一区块里「正在跑」与「已跑完」不能同色（子代理：运行中绿、已停止黄、失败红）；
+// 红色只表达真实错误与高风险；百分比不要一律涂绿。
 
 // 颜色阈值（上下文占用 / 额度已用占比）
 export const PCT_WARN_THRESHOLD = 50 // ≥50% 变橙
@@ -19,8 +21,8 @@ export const MUTED_COLOR = "#858585" // 标签 / 单位 / 弱化注记
 export const INPUT_COLOR = "#76A9E0" // token 输入分量
 export const OUTPUT_COLOR = "#B99AF7" // token 输出分量
 export const CACHE_COLOR = "#65BFA6" // token 缓存分量
-export const SUCCESS_COLOR = "#86C89A" // 正常运行 / 成功
-export const WARNING_COLOR = "#E5A05A" // 中风险 / 中断
+export const SUCCESS_COLOR = "#86C89A" // 运行中 / 成功 / 低占用
+export const WARNING_COLOR = "#E5A05A" // 已停止 / 中断 / 中风险（≥50%）
 export const ERROR_COLOR = "#E06C75" // 真实错误 / 高风险
 
 // 区块标题（TUI 展示文案，用中文）

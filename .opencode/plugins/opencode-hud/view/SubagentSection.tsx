@@ -1,5 +1,5 @@
 // ─── UI 层：子代理卡片（运行中任务卡 + 已停止紧凑行） ───
-// 两级结构：运行中 = 抬升底色 + 琥珀左侧强调线 + 两行（标题 / 耗时 · 消耗）；
+// 两级结构：运行中 = 抬升底色 + 绿色左侧强调线 + 两行（标题 / 耗时 · 消耗）；
 //           已停止 = 单行紧凑列表，结局点按 outcome 上色。
 // 结局来自宿主 SessionInfo.outcome（succeeded/failed/interrupted），不用 running=false 推断成功。
 // ⚠️ 响应式约束：组件函数体只执行一次，禁止 props 快照 const；
@@ -27,7 +27,6 @@ import {
 import { fmtElapsed, fmtPct, fmtPerf, fmtTokens, padEndVisual, padStartVisual, truncateVisual } from "../shared/format.ts"
 import { DashboardCard } from "./Card.tsx"
 import {
-  ACCENT_COLOR,
   ERROR_COLOR,
   MUTED_COLOR,
   RAISED_COLOR,
@@ -38,19 +37,18 @@ import {
   WARNING_COLOR,
 } from "./theme.ts"
 
-// 结局色：运行中 = 琥珀（当前活动），成功绿 / 失败红 / 中断琥珀 / 未知灰
+// 状态色（v3.1.0 约定）：运行中 = 绿，已停止 = 黄；失败仍红（红色只给真实错误）。
+// 成功 / 中断 / 未知结局都属「已停止」，共用黄，不再按结局细分色阶。
 export function stateColor(state: SubagentState): string {
   switch (state) {
     case "running":
-      return ACCENT_COLOR
-    case "succeeded":
       return SUCCESS_COLOR
     case "failed":
       return ERROR_COLOR
+    case "succeeded":
     case "interrupted":
-      return WARNING_COLOR
     case "stopped":
-      return MUTED_COLOR
+      return WARNING_COLOR
   }
 }
 
@@ -103,14 +101,14 @@ function Details(props: { row: SubagentRow }): JSX.Element {
   )
 }
 
-// 运行中：抬升底色的三行任务卡（标题 / 耗时·消耗 / 首字·速度），左侧琥珀强调线
+// 运行中：抬升底色的三行任务卡（标题 / 耗时·消耗 / 首字·速度），左侧绿色强调线
 function RunningRow(props: { row: SubagentRow; frame: number; onToggle: () => void }): JSX.Element {
   return (
     <box
       flexDirection="column"
       backgroundColor={RAISED_COLOR}
       border={["left"]}
-      borderColor={ACCENT_COLOR}
+      borderColor={stateColor("running")}
       paddingLeft={1}
       paddingRight={1}
     >
@@ -178,15 +176,10 @@ function Counts(props: {
   return (
     <box flexDirection="row" height={1}>
       <box flexDirection="row" flexShrink={1} minWidth={0}>
-        <Show when={props.counts.running > 0}>
-          <text fg={SUCCESS_COLOR} wrapMode="none">{`● ${props.counts.running} 运行中`}</text>
-        </Show>
-        <Show when={props.counts.running > 0 && props.counts.stopped > 0}>
-          <text> </text>
-        </Show>
-        <Show when={props.counts.stopped > 0}>
-          <text fg={SECONDARY_COLOR} wrapMode="none">{`${props.counts.stopped} 已停止`}</text>
-        </Show>
+        {/* 运行中 / 已停止常驻，0 也显示：全停与全跑必须在计数行一眼能区分 */}
+        <text fg={SUCCESS_COLOR} wrapMode="none">{`● ${props.counts.running} 运行中`}</text>
+        <text> </text>
+        <text fg={WARNING_COLOR} wrapMode="none">{`${props.counts.stopped} 已停止`}</text>
         <Show when={props.counts.failed > 0}>
           <text fg={ERROR_COLOR} wrapMode="none">{`  ${props.counts.failed} 失败`}</text>
         </Show>

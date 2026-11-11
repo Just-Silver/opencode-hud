@@ -50,7 +50,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - **宿主侧栏为 42 列，本插件可用 37 列**（`42 − 宿主 padding 4 − scrollbox 预留 1`，见 `packages/tui/src/routes/session/sidebar.tsx`）。卡片一圈圆角边框（2 列）+ 左右内边距（2 列）→ 内容 **33 列**；所有几何常量只在 `view/layout.ts` 定义，**不要用 `onSizeChange` 实测**（首帧为 0，会让标题在两种截断宽度间闪）。
 - 视觉分层两种底色：`CARD_COLOR`（HUD 连续表面 + 卡片底）→ `RAISED_COLOR`（指标块/运行中任务）。卡片之间的空行也用 `CARD_COLOR`，不要露更暗的间隙（会有「断层」感）。区块用 `DashboardCard`：**一卡一圈 `borderStyle="rounded"` 边框 + 边框内标题（box `title`）**，不要再叠第二层边框/分隔线，也不要在卡片下垫色块。
 - 卡片**不做整卡折叠**（折叠后只剩空边框）；区块内折叠（额度分组、子代理详情与历史段）保留。
-- 配色只从 `view/theme.ts` 取（OpenCode Native Pro，固定暗色，不跟随 `ctx.theme`）。琥珀是唯一强调色；绿色只给「运行中/成功」；红色只给真实错误与 ≥85%。上下文主指标用 `contextColor`（琥珀，≥85 转红），额度「已用占比」用 `usageColor`（低=绿、≥50 橙、≥85 红）。token 分量色：输入蓝 / 输出紫 / 缓存青绿 / 推理琥珀。
+- 配色只从 `view/theme.ts` 取（OpenCode Native Pro，固定暗色，不跟随 `ctx.theme`）。琥珀是强调色，给品牌元素与上下文主指标；绿色表示「运行中 / 成功 / 低占用」，但**同一区块内「正在跑」与「已跑完」不能同色**（子代理区块：运行中绿、已停止黄、失败红；计数 0 也显示）；红色只给真实错误与 ≥85%。上下文主指标用 `contextColor`（琥珀，≥85 转红），额度「已用占比」用 `usageColor`（低=绿、≥50 橙、≥85 红）。token 分量色：输入蓝 / 输出紫 / 缓存青绿 / 推理琥珀。
 - 整个 HUD 由 `Sidebar` 的 `hasContent()` 门控（用量 / 额度 / 子代理 / 更新提示全无时整块不渲染）；三块内容各自独立门控，**额度不得嵌在「有会话用量」里**（新会话还没有 token 时，已登录订阅照样要能看）。更新检查在 `view/hooks/useUpdate.ts`，进程内只跑一次 Promise，横幅随 `hasContent()` 一起卸载也不丢状态。
 - 无数据区块整块不渲染（额度为空、供应商不支持、无子代理），不要显示“不支持/无数据”占位。
 - 进度条 0% 不渲染填充块：OpenTUI 里 `flexGrow=0` 的 box 仍占 1 格，`ColorBar` 用 `Show when={pct > 0}` 门控。
