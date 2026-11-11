@@ -11,6 +11,7 @@
   - `sidebar.content` → `view/Sidebar.tsx`（ViewModel：信号/memo/副作用都在这里）
   - `prompt.footer.status` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度）
 - 桌面 GUI 入口（`gui-experimental.cjs`）与 Markdown 配色**已冻结并删除**，当前只服务 TUI；恢复方式与设计见 `docs/design-desktop-entry.md`。
+- **宿主源码在本机**：`D:\Code\Projects\Agents\opencode`（opencode 2.x 工作树，版本以它 `package.json` 为准）。核对宿主 API、slot 跨度、键位、内置 UI 行为时直接读这里（`packages/tui/src`、`packages/plugin/src`、`packages/client/src`、`packages/schema/src`），**不要先搜网**；文档里引用的 `packages/...` 行号即指这个目录。
 - 目录职责：`model/` = 数据与纯函数；`quota/` = 供应商发现 + 凭据 + 查询；`shared/` = 通用纯函数；`view/` = Solid UI；`update/` = 更新检查与一键更新。
 - **相对导入必须带 `.ts`/`.tsx` 后缀**：运行时由 Bun 逐文件直接 import，没有打包器做后缀解析。
 
@@ -38,6 +39,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - 排查加载：`opencode2 plugin list` 只列候选且读 service 缓存，改盘后可能需要 `opencode2 service restart`；真实加载看 `opencode2 api --standalone --print-logs GET /api/plugin` 的 `loading plugin` / `WARN failed to load plugin`。
 - 开发时 opencode2 会热重载该插件目录（新增/重命名/删除文件通常无需重启）。
 - **TUI 插件没有 `app.log` API**（`ctx.client.app.log` 会崩）。`console.*` 进 OpenTUI 应用内 console 面板，不进 `opencode.log`；`opencode.log` 只有宿主的插件加载器日志。不要新增文件日志。
+- 应用内 console 就是 OpenTUI 的 `TerminalConsole` 覆盖层（默认底部 30%、2000 条环形缓冲、`openConsoleOnError: false`），**不会自己弹出**：`ctrl+p` → 搜「Toggle console」（`app.console` 默认无键位，可在 `tui.json` 的 `keybinds` 绑）；面板内 `ctrl+s` 存 `_console_<时间戳>.log` 到 cwd，`ctrl+shift+c`/`ctrl+y` 复制选区。宿主渲染器配置见 `packages/tui/src/app.tsx` 的 `consoleOptions`。
 
 # Solid / UI 硬约束
 
@@ -59,7 +61,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - 未用真实响应验证前用 `enabled: false`；展示设计（显示哪几行、标签叫什么）先与用户确认。
 - 白名单、URL、fetcher 分发均按 `normID`（小写 + 仅保留 a-z）匹配；未注册/未启用返回 `undefined`，**无兜底**。
 - 凭据统一在 `quota/key.ts`：keyCache（60s TTL）→ 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 取 `active` 且最近更新的那条（`ORDER BY active DESC, time_updated DESC, id DESC`），按 `type` 取值：`key` → `key`，`oauth` → `access`；该条不可用时不回退旧记录。`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下；`openai` 的在 `integration_id="openai"`，且**只有 Codex 登录（`chatgpt-browser`/`headless`）的 token 能查额度**，token-sharing 一律 401（见 `docs/provider-openai-quota.md`）。只读现值，不刷新、不落盘、不写日志。
-- `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。Sidebar 每 60s 用 `QUOTA_TICK_MS` 检查一次（凭据/退避），是否符合刷新间隔由 store 决定，切回会话走缓存。
+- `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。Sidebar 每 60s 用 `QUOTA_TICK_MS` 检查一次（凭据/退避），是否符合刷新间隔由 store 决定，切回会话走缓存。**只有 `isQuotaProvider` 命中的 pid 才调 `load`**：未注册端点静默返回、不记日志（否则非额度供应商会被 60s 心跳刷成 `missing api url`）；`missing key` 的 warn 也只按刷新间隔记一次。
 - 网络请求统一走 `shared/http.ts`：5s 超时/中止、8MB 上限、`Retry-After`、401/429/超时/网络/坏 JSON 归类、错误文本先脱敏再截断。provider 不再直接 `fetch`。
 - 当前已启用：`opencode-go`（`/zen/go/v1/usage`）、`command-code`（credits + subscriptions 双 API）、`openai`（`chatgpt.com/backend-api/wham/usage`，5h/周 + 有月度额度时补「月」）。Zen 侧 `/zen/v1/usage` 为 404，所以 `opencode` 不接额度。
 
@@ -85,6 +87,9 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `docs/design-subagent-section.md` — 子代理区块取数、耗时口径与布局。
 - `docs/reference-opencode-cache-and-tps.md` — 外部同类插件的可借鉴设计。
 - `docs/reference-opencode-quota.md` — 外部同类项目 opencode-quota 的可借鉴项（行语义/配速、HTTP、凭据、刷新、server+RPC、用量与工程化取舍）。
+- `docs/reference-multi-provider-quota.md` — 多订阅额度展示的同类实现（slkiser/opencode-quota 等）：分组/两级折叠/代表窗口/刷新与错误口径，及可借鉴清单。
+- `docs/superpowers/specs/2026-11-11-multi-provider-quota-design.md` — 额度区块展示全部已登录订阅的设计（发现/排序/折叠/验收）。
+- `docs/reference-usage-monitor-refresh-cadence.md` — 外部高星用量监控项目的刷新间隔/退避样本与「网络端点 vs 本地读取」分档，用于判断本插件 5min 间隔是否合理。
 - `docs/reference-desktop-gui-plugins.md` — OpenCode Desktop GUI 插件（`./gui-experimental`）开发手册：构建/加载规则、窗口与主进程上下文、注册表、Ipc/存储/生命周期、排障；**§15 是 2.2.0 实机验证结论**（目录型插件三入口、server 可 import 什么、共用 RPC 契约、槽位真实跨度）。
 - `docs/design-desktop-entry.md` — 双入口设计与桌面 Markdown 配色的历史记录（**已冻结**）、恢复方式与后续 HUD 面板路线。
 - `docs/reference-realtime-tps.md` — 历史调研；实时 TPS 已在 v4.0.0 移除。
