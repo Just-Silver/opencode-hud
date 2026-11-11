@@ -9,6 +9,7 @@ import { normID } from "../shared/id.ts"
 // 发现接口：providers/*.ts 导出 provider 即视为一个供应商查询
 export type ProviderRegistration = {
   id: string
+  name?: string // 显示名（UI 用）；省略时回退 id
   apiUrl: string
   enabled?: boolean // 默认 true；false = 已实现但暂不激活（如等待真实数据验证）
   render?: string // 共享渲染器名（view/renderers 注册）；省略/未知 → 默认 "bars"
@@ -28,6 +29,13 @@ export function createRegistry(providers: ProviderRegistration[]) {
   // 白名单守卫：pid 是否命中已注册且启用的供应商
   const isQuotaProvider = (pid: string): boolean => match(pid) !== undefined
 
+  // 有查询能力的供应商清单（保持发现顺序）：UI 用它决定「可以展示哪些供应商」
+  const listProviders = (): { id: string; name: string }[] =>
+    active.map((p) => ({ id: p.id, name: p.name ?? p.id }))
+
+  // 显示名：命中用注册名，未命中 undefined（UI 回退 id）
+  const getProviderName = (pid: string): string | undefined => match(pid)?.name ?? match(pid)?.id
+
   // API URL 查找：未命中返回 undefined（调用方 QuotaStore 记 warn 并跳过，不做兜底指向）
   const getProviderApiUrl = (pid: string): string | undefined => match(pid)?.apiUrl
 
@@ -40,5 +48,5 @@ export function createRegistry(providers: ProviderRegistration[]) {
     return p ? p.fetch(apiUrl, key) : undefined
   }
 
-  return { isQuotaProvider, getProviderApiUrl, getProviderRenderer, fetchQuota }
+  return { isQuotaProvider, getProviderApiUrl, getProviderRenderer, fetchQuota, listProviders, getProviderName }
 }

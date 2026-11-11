@@ -39,6 +39,7 @@ export async function fetchOpencodeGo(apiUrl: string, key: string): Promise<Quot
 
 export const provider: ProviderRegistration = {
   id: "opencode-go",
+  name: "OpenCode Go",
   apiUrl: QUOTA_API_URL,
   render: "bars",
   fetch: fetchOpencodeGo,

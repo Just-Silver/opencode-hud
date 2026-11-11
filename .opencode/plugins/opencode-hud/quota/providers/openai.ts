@@ -112,6 +112,7 @@ export async function fetchOpenai(apiUrl: string, key: string): Promise<QuotaDat
 
 export const provider: ProviderRegistration = {
   id: "openai",
+  name: "OpenAI",
   apiUrl: OPENAI_USAGE_URL,
   render: "bars",
   fetch: fetchOpenai,

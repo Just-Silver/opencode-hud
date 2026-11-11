@@ -83,6 +83,7 @@ export async function fetchCommandCode(apiUrl: string, key: string): Promise<Quo
 // 自动发现注册
 export const provider: ProviderRegistration = {
   id: "command-code",
+  name: "Command Code",
   apiUrl: COMMANDCODE_CREDITS_URL,
   render: "bars",
   fetch: fetchCommandCode,

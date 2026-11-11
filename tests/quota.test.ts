@@ -95,3 +95,12 @@ test("getProviderApiUrl：未注册/未启用 pid → undefined（不兜底指�
   assert.equal(registry.getProviderApiUrl("command-code"), undefined) // 未注册
   assert.equal(registry.getProviderApiUrl("nope"), undefined)
 })
+test("listProviders：只返回启用项，省略 name 时回退 id；getProviderName 未命中 undefined", () => {
+  const reg = createRegistry([
+    opencodeGo,
+    { id: "command-code", apiUrl: "https://api.commandcode.ai/alpha/billing/credits", fetch: async () => undefined, enabled: false },
+  ])
+  assert.deepEqual(reg.listProviders(), [{ id: "opencode-go", name: "opencode-go" }])
+  assert.equal(reg.getProviderName("opencode-go"), "opencode-go")
+  assert.equal(reg.getProviderName("command-code"), undefined)
+})
