@@ -2,6 +2,7 @@
 // 一卡一边框，标题写在顶边上（OpenTUI 的 box title），不再叠第二层边框/分隔线。
 // 不做整卡折叠：卡片折叠后只剩一个空边框，视觉上比不折叠更糟；区块内的折叠
 // （额度分组、子代理详情与历史段）仍然保留。
+// 不留上下内边距：边框自己就是分隔线，再多一行空行会显得卡片很「空」。
 /** @jsxImportSource @opentui/solid */
 import type { JSX } from "solid-js"
 import { ACCENT_COLOR, BORDER_COLOR, CARD_COLOR } from "./theme.ts"
@@ -18,7 +19,6 @@ export function DashboardCard(props: { title: string; children: JSX.Element }): 
       titleColor={ACCENT_COLOR}
       paddingLeft={1}
       paddingRight={1}
-      paddingBottom={1}
     >
       {props.children}
     </box>
