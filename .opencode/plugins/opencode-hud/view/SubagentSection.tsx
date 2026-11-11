@@ -236,8 +236,9 @@ export function SubagentSection(props: {
           </Show>
         </box>
 
-        {/* 表尾：收起全部（仅在有展开项时可点）+ 合计消耗（始终显示） */}
-        <box flexDirection="row" height={1} paddingTop={1}>
+        {/* 表尾：收起全部（仅在有展开项时可点）+ 合计消耗（始终显示）。
+            不要加 paddingTop：height=1 会把这一行压成一行空行（内容被裁掉），合计反而看不见。 */}
+        <box flexDirection="row" height={1}>
           <Show when={anythingExpanded()}>
             <text
               fg={TEXT_COLOR}
