@@ -190,14 +190,16 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
   )
 
   // effect：会话/数据变化触发首次加载（限流防抖，render 高频重建不连击）
+  // 只对已注册的额度供应商加载：其他供应商没有查询端点，调用只会产生日志噪音
+  const loadQuota = (pid: string | undefined) => {
+    if (pid && isQuotaProvider(pid)) void store.load(pid)
+  }
   createEffect(() => {
-    const pid = providerID()
-    if (pid) void store.load(pid)
+    loadQuota(providerID())
   })
   // timer：每 60s 检查一次（凭据/退避）；是否符合网络刷新间隔由 store 判断
   const timer = setInterval(() => {
-    const pid = providerID()
-    if (pid) void store.load(pid)
+    loadQuota(providerID())
   }, QUOTA_TICK_MS)
   onCleanup(() => clearInterval(timer))
 

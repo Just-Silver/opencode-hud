@@ -49,13 +49,26 @@ test("load missing key：记 warn、不写缓存、返回 false", async () => {
   assert.deepEqual(deps.logs, [{ level: "warn", message: "quota opencode-go missing key" }])
 })
 
-test("load missing api url：记 warn、不写缓存、返回 false", async () => {
+test("没凭据：warn 按刷新间隔节流，60s 心跳不重复刷屏", async () => {
+  let now = 1_000_000
+  const deps = makeDeps({ resolveKey: async () => undefined, now: () => now })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  now += 60_000
+  await store.load("opencode-go")
+  assert.equal(deps.logs.length, 1) // 心跳期内不再记
+  now += QUOTA_REFRESH_MS
+  await store.load("opencode-go")
+  assert.equal(deps.logs.length, 2) // 过了刷新间隔才再记一次
+})
+
+test("未注册额度端点：静默跳过，不发请求、不写缓存、不记日志", async () => {
   const deps = makeDeps({ apiUrlFor: () => undefined })
   const store = new QuotaStore(deps)
-  assert.equal(await store.load("opencode-go"), false)
-  assert.equal(store.get("opencode-go"), undefined)
+  assert.equal(await store.load("open-design"), false)
+  assert.equal(store.get("open-design"), undefined)
   assert.equal(deps.fetchCalls.length, 0)
-  assert.deepEqual(deps.logs, [{ level: "warn", message: "quota opencode-go missing api url" }])
+  assert.deepEqual(deps.logs, [])
 })
 
 test("load empty response：记 warn、不写缓存", async () => {

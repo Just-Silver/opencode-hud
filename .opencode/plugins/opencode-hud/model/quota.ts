@@ -117,13 +117,10 @@ export class QuotaStore {
   // 不绕过失败退避与 Retry-After（timer 轮询用，避免限流时持续加压）。
   // 返回 true = 本次拿到了可用数据；被间隔/退避/Retry-After 跳过返回 false。
   async load(pid: string, opts?: { force?: boolean }): Promise<boolean> {
+    // 未注册额度端点：正常路径不可达（候选来自 registry），静默跳过。
+    // 不记日志：调用方漏了白名单守卫时，60s 心跳会把「供应商本来就没有查询」刷成 warn。
     const apiUrl = this.deps.apiUrlFor(pid)
-    if (!apiUrl) {
-      const entry = this.adopt(pid, "")
-      entry.at = this.now()
-      this.deps.log("warn", `quota ${pid} missing api url`)
-      return false
-    }
+    if (!apiUrl) return false
 
     // 先解析凭据再判断间隔：否则旧凭据的退避会挡住新凭据的第一次尝试。
     let key: string | undefined
@@ -135,8 +132,12 @@ export class QuotaStore {
     const fingerprint = key ? fingerprintOf(key) : ""
     const entry = this.adopt(pid, fingerprint)
     if (!key) {
-      entry.at = this.now()
-      this.deps.log("warn", `quota ${pid} missing key`)
+      // 没凭据是常态（没登录 / 未连接），日志按刷新间隔节流，避免心跳每分钟刷一条
+      const now = this.now()
+      const waitMs = entry.failures > 0 ? backoffMs(entry.failures) : QUOTA_REFRESH_MS
+      const due = entry.at === undefined || now - entry.at >= waitMs
+      entry.at = now
+      if (due) this.deps.log("warn", `quota ${pid} missing key`)
       return false
     }
 
