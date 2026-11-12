@@ -7,7 +7,6 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo, createSignal, Index, Show, type JSX } from "solid-js"
 import {
-  AGENT_DETAIL_MAX,
   AGENT_ELAPSED_WIDTH,
   AGENT_RUNNING_TITLE_MAX,
   AGENT_TITLE_MAX,
@@ -15,17 +14,16 @@ import {
 } from "./layout.ts"
 import {
   headingOf,
-  modelLabel,
   statusGlyph,
   subagentCounts,
-  subagentStateLabel,
   totalTokensText,
   visibleRows,
   type SubagentRow,
   type SubagentState,
 } from "../model/subagent.ts"
-import { fmtElapsed, fmtPct, fmtPerf, fmtTokens, padEndVisual, padStartVisual, truncateVisual } from "../shared/format.ts"
+import { fmtElapsed, fmtPerf, fmtTokens, padStartVisual, truncateVisual } from "../shared/format.ts"
 import { DashboardCard } from "./Card.tsx"
+import { TaskInspector } from "./TaskInspector.tsx"
 import {
   ERROR_COLOR,
   MUTED_COLOR,
@@ -50,55 +48,6 @@ export function stateColor(state: SubagentState): string {
     case "stopped":
       return WARNING_COLOR
   }
-}
-
-// 展开详情的一行：缩进 2 + 四列标签 + 值
-function DetailRow(props: { label: string; value: string; color?: string }): JSX.Element {
-  return (
-    <box flexDirection="row" height={1}>
-      <text fg={MUTED_COLOR} wrapMode="none">{`  ${padEndVisual(props.label, 4)} `}</text>
-      <text fg={props.color ?? SECONDARY_COLOR} wrapMode="none">
-        {truncateVisual(props.value, AGENT_DETAIL_MAX)}
-      </text>
-    </box>
-  )
-}
-
-function Details(props: { row: SubagentRow }): JSX.Element {
-  return (
-    <box flexDirection="column" paddingTop={1} paddingBottom={1}>
-      {/* 完整标题：主行必须截断才能给右侧数字列让位，展开时补一行不截断的 */}
-      <Show when={props.row.title}>
-        <box flexDirection="row">
-          <text fg={MUTED_COLOR} wrapMode="none" flexShrink={0}>
-            {"  标题 "}
-          </text>
-          <box flexGrow={1} minWidth={0}>
-            {/* 中文标题没有空格分隔，word 模式不会断行；按字符断 */}
-            <text fg={SECONDARY_COLOR} wrapMode="char">
-              {props.row.title}
-            </text>
-          </box>
-        </box>
-      </Show>
-      <DetailRow
-        label="状态"
-        value={subagentStateLabel(props.row.state)}
-        color={stateColor(props.row.state)}
-      />
-      <Show when={props.row.modelID}>
-        <DetailRow label="模型" value={modelLabel(props.row.modelID, props.row.variant)} />
-      </Show>
-      <DetailRow label="代理" value={props.row.agent} />
-      <Show when={props.row.cacheRate !== undefined}>
-        <DetailRow label="命中" value={fmtPct(props.row.cacheRate)} />
-      </Show>
-      {/* 运行中条目的首字/速度已在常驻行显示，详情不再重复；已停止条目靠这一行补充 */}
-      <Show when={props.row.running ? "" : fmtPerf(props.row.ttftMs, props.row.tps)}>
-        {(text) => <DetailRow label="性能" value={text()} />}
-      </Show>
-    </box>
-  )
 }
 
 // 运行中：抬升底色的三行任务卡（标题 / 耗时·消耗 / 首字·速度），左侧绿色强调线
@@ -134,7 +83,7 @@ function RunningRow(props: { row: SubagentRow; frame: number; onToggle: () => vo
         )}
       </Show>
       <Show when={props.row.expanded}>
-        <Details row={props.row} />
+        <TaskInspector row={props.row} />
       </Show>
     </box>
   )
@@ -158,7 +107,7 @@ function StoppedRow(props: { row: SubagentRow; onToggle: () => void }): JSX.Elem
         </text>
       </box>
       <Show when={props.row.expanded}>
-        <Details row={props.row} />
+        <TaskInspector row={props.row} />
       </Show>
     </box>
   )

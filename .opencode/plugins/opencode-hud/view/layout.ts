@@ -29,9 +29,8 @@ export const AGENT_TITLE_MAX = CARD_INNER - AGENT_STOPPED_LEAD - AGENT_TAIL - 1
 // 运行中块：左侧强调线 1 + 左右内边距 2 → 内容 30；行首 spinner 2 + 右侧箭头 1
 export const AGENT_RUNNING_INNER = CARD_INNER - 3
 export const AGENT_RUNNING_TITLE_MAX = AGENT_RUNNING_INNER - 2 - 2
-// 展开行：缩进 2 + 标签 4 + 空格 1 = 7；运行中块内宽 30，展开值上限取 23
-// （按 33 − 7 = 26 会撑出运行中块 3 列，两处共用这个更保守的上限）
-export const AGENT_DETAIL_MAX = 23
+// 展开详情（Task Inspector）：左右内边距 2 / 1；运行中卡片内宽 30 → 版心 27（按较窄的一侧排版）
+export const AGENT_INSPECTOR_INNER = AGENT_RUNNING_INNER - 3
 
 // ── 额度组 ──
 export const QUOTA_INDENT = 2
