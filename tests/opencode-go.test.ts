@@ -21,8 +21,8 @@ test("mapOpencodeGo：三窗口 → 条目（标签 5h/周/月 + hint 重置时�
   assert.equal(q?.items[0].percent, 0)
   assert.equal(q?.items[1].percent, 12.5)
   assert.equal(q?.items[2].percent, 30)
-  assert.match(q?.items[0].hint ?? "", /^↻ \d{2}:\d{2}$/) // <24h → 本地时刻（带 ↻ 前缀）
-  assert.match(q?.items[1].hint ?? "", /^↻ 周[日一二三四五六]$/) // <7d → 周X
+  assert.match(q?.items[0].hint ?? "", /^↻ \d+(?:m|h(?:\d+m)?|d)$/) // 相对剩余时长（带 ↻ 前缀）
+  assert.match(q?.items[1].hint ?? "", /^↻ \d+(?:m|h(?:\d+m)?|d)$/)
   assert.equal(q?.items[2].hint, undefined) // 无 resetsAt → 无 hint
 })
 

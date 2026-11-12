@@ -92,10 +92,10 @@ export function quotaPct(item: QuotaItem | undefined): number | undefined {
   return typeof p === "number" && Number.isFinite(p) ? p : undefined
 }
 
-// ── 额度窗口重置时间（ISO 字符串）→ 短文本（本地时区） ──
-// 分级：<24h → 本地时刻 HH:MM；<7d → 周X；否则 MM-DD。缺失/非法/已过期 → undefined（不显示）。
+// ── 额度窗口重置时间（ISO 字符串）→ 相对剩余时长 ──
+// 分级：<60min → Nm；<24h → Nh / NhMMm（整点省略分钟）；其他 → Nd。全部向下取整：
+// 宁可少报，也不让「还剩 30 秒」读成 1 分钟。缺失/非法/已过期 → undefined（不显示）。
 // now 可注入便于单测；各供应商可能不返回 resetsAt（如 Command Code），故调用方需容忍 undefined。
-const WEEKDAY_CN = ["日", "一", "二", "三", "四", "五", "六"] as const
 export function fmtResetTime(iso: string | undefined, now: Date = new Date()): string | undefined {
   if (!iso) return undefined
   const t = new Date(iso)
@@ -103,14 +103,17 @@ export function fmtResetTime(iso: string | undefined, now: Date = new Date()): s
   if (Number.isNaN(ms)) return undefined
   const diff = ms - now.getTime()
   if (diff <= 0) return undefined // 已到期/已重置：不显示
-  if (diff < 24 * 3600_000) {
-    return `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`
+  const minutes = Math.floor(diff / 60_000)
+  if (minutes < 60) return `${minutes}m`
+  const hours = Math.floor(diff / 3600_000)
+  if (hours < 24) {
+    const rest = minutes - hours * 60
+    return rest === 0 ? `${hours}h` : `${hours}h${rest}m`
   }
-  if (diff < 7 * 24 * 3600_000) return `周${WEEKDAY_CN[t.getDay()]}`
-  return `${String(t.getMonth() + 1).padStart(2, "0")}-${String(t.getDate()).padStart(2, "0")}`
+  return `${Math.floor(diff / 86_400_000)}d`
 }
 
-// 额度重置提示（含刷新图标前缀）：fmtResetTime 有值时返回 "↻ 02:28"，否则 undefined。
+// 额度重置提示（含刷新图标前缀）：fmtResetTime 有值时返回 "↻ 4h12m"，否则 undefined。
 // 供 provider 生成 QuotaItem.hint 用（图标在 shared 统一，宽度由 charColumns 按 2 列计）。
 export function fmtResetHint(iso: string | undefined, now: Date = new Date()): string | undefined {
   const t = fmtResetTime(iso, now)

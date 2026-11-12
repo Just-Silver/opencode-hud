@@ -22,8 +22,8 @@ test("mapOpenai：5h + 周窗口 → 条目（标签按窗口秒数，hint 为�
   )
   assert.equal(q?.items[0].percent, 15)
   assert.equal(q?.items[1].percent, 2)
-  assert.match(q?.items[0].hint ?? "", /^↻ \d{2}:\d{2}$/) // <24h → 本地时刻
-  assert.match(q?.items[1].hint ?? "", /^↻ 周[日一二三四五六]$/) // <7d → 周X
+  assert.match(q?.items[0].hint ?? "", /^↻ \d+(?:m|h(?:\d+m)?|d)$/) // 相对剩余时长
+  assert.match(q?.items[1].hint ?? "", /^↻ \d+(?:m|h(?:\d+m)?|d)$/)
 })
 
 test("mapOpenai：有月度额度时补一行「月」，percent = 100 − remaining", () => {
@@ -36,12 +36,12 @@ test("mapOpenai：有月度额度时补一行「月」，percent = 100 − remai
     ["5h", "月"],
   )
   assert.equal(q?.items[1].percent, 70)
-  assert.match(q?.items[1].hint ?? "", /^↻ \d{2}-\d{2}$/) // >7d → MM-DD
+  assert.match(q?.items[1].hint ?? "", /^↻ \d+(?:m|h(?:\d+m)?|d)$/) // 相对剩余时长
 })
 
 test("mapOpenai：只有 reset_after_seconds 时也算得出重置时间", () => {
   const q = mapOpenai({ rate_limit: { primary_window: { used_percent: 1, limit_window_seconds: 18000, reset_after_seconds: 3600 } } })
-  assert.match(q?.items[0].hint ?? "", /^↻ \d{2}:\d{2}$/)
+  assert.match(q?.items[0].hint ?? "", /^↻ \d+(?:m|h(?:\d+m)?|d)$/)
 })
 
 test("mapOpenai：越界百分比 clamp 到 0-100", () => {

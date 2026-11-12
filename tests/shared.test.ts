@@ -110,28 +110,31 @@ test("dividerLine：按宽度重复，最少 1 个字符", () => {
   assert.equal(dividerLine(-5).length, 1)
 })
 
-// ─── fmtResetTime：重置时间分级（本地时区；now 注入保证确定性） ───
-test("fmtResetTime：<24h 时刻 / <7d 周X / 否则 MM-DD / 异常与过期不显示", () => {
-  const now = new Date(2026, 9, 12, 10, 0, 0) // 本地 2026-10-12 10:00（周一）
-  const at3h = new Date(now.getTime() + 3 * 3600_000)
-  assert.equal(fmtResetTime(at3h.toISOString(), now), "13:00")
-  const in3d = new Date(now.getTime() + 3 * 24 * 3600_000)
-  assert.equal(fmtResetTime(in3d.toISOString(), now), "周四")
-  const in20d = new Date(2026, 10, 1, 0, 0, 0) // 本地 2026-11-01
-  assert.equal(fmtResetTime(in20d.toISOString(), now), "11-01")
+// ─── fmtResetTime：相对剩余时长（分 / 时 / 天，向下取整） ───
+test("fmtResetTime：相对剩余时长，过期/非法不显示", () => {
+  const now = new Date(2026, 9, 12, 10, 0, 0) // 本地 2026-10-12 10:00
+  const at = (ms: number) => new Date(now.getTime() + ms).toISOString()
+  assert.equal(fmtResetTime(at(59_000), now), "0m") // 向下取整：不满 1 分钟
+  assert.equal(fmtResetTime(at(60_000), now), "1m")
+  assert.equal(fmtResetTime(at(59 * 60_000), now), "59m")
+  assert.equal(fmtResetTime(at(3600_000), now), "1h") // 整点不写 0m
+  assert.equal(fmtResetTime(at((4 * 60 + 12) * 60_000), now), "4h12m")
+  assert.equal(fmtResetTime(at((23 * 60 + 59) * 60_000), now), "23h59m")
+  assert.equal(fmtResetTime(at(24 * 3600_000), now), "1d")
+  assert.equal(fmtResetTime(at((29 * 24 + 23) * 3600_000), now), "29d") // 天数向下取整
   assert.equal(fmtResetTime(undefined, now), undefined)
   assert.equal(fmtResetTime("nope", now), undefined)
-  assert.equal(fmtResetTime(new Date(now.getTime() - 1000).toISOString(), now), undefined) // 已过期
+  assert.equal(fmtResetTime(at(-1000), now), undefined) // 已过期
 })
 
 // ─── fmtResetHint：重置时间 + ↻ 前缀（provider 生成 QuotaItem.hint 用） ───
 test("fmtResetHint：有值时加 ↻ 前缀，无值/过期 → undefined", () => {
   const now = new Date(2026, 9, 12, 10, 0, 0)
-  const at3h = new Date(now.getTime() + 3 * 3600_000)
-  assert.equal(fmtResetHint(at3h.toISOString(), now), "↻ 13:00")
+  const at = (ms: number) => new Date(now.getTime() + ms).toISOString()
+  assert.equal(fmtResetHint(at(3 * 3600_000), now), "↻ 3h")
   assert.equal(fmtResetHint(undefined, now), undefined)
   assert.equal(fmtResetHint("nope", now), undefined)
-  assert.equal(fmtResetHint(new Date(now.getTime() - 1000).toISOString(), now), undefined)
+  assert.equal(fmtResetHint(at(-1000), now), undefined)
 })
 test("quotaSummaryText：标签 + 百分比/文本，带重置提示时一并显示", () => {
   assert.equal(quotaSummaryText({ label: "5h", percent: 36, hint: "↻18:07" }), "5h 36% ↻18:07")
