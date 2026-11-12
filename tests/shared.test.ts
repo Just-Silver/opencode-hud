@@ -144,9 +144,9 @@ test("quotaSummaryText：标签 + 百分比/文本，带重置提示时一并显
 })
 
 // ─── fmtAge：数据新鲜度短格式 ───
-test("fmtAge：刚刚 / 分钟 / 小时 / 天（只做展示，不参与计算）", () => {
-  assert.equal(fmtAge(0), "刚刚")
-  assert.equal(fmtAge(59_000), "刚刚")
+test("fmtAge：0m / 分钟 / 小时 / 天（只做展示，不参与计算）", () => {
+  assert.equal(fmtAge(0), "0m")
+  assert.equal(fmtAge(59_000), "0m")
   assert.equal(fmtAge(60_000), "1m")
   assert.equal(fmtAge(59 * 60_000), "59m")
   assert.equal(fmtAge(60 * 60_000), "1h")

@@ -146,12 +146,11 @@ export function fmtPerf(ttftMs: number | undefined, tps: number | undefined): st
   return [fmtSec(ttftMs), fmtTpsText(tps)].filter(Boolean).join(" · ")
 }
 
-// 数据新鲜度（短格式）：刚刚 / 3m / 2.4h / 3d
+// 数据新鲜度（短格式）：0m / 3m / 2.4h / 3d。不满 1 分钟就是 0m，不做「刚刚」这种模糊档
 // 只用于「距上次成功刷新」的弱化注记，不参与任何业务计算
 export function fmtAge(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return ""
   const minutes = Math.floor(ms / 60_000)
-  if (minutes < 1) return "刚刚"
   if (minutes < 60) return `${minutes}m`
   const hours = ms / 3_600_000
   if (hours < 24) return `${Math.round(hours * 10) / 10}h`

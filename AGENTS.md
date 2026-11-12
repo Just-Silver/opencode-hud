@@ -97,6 +97,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `docs/reference-multi-provider-quota.md` — 多订阅额度展示的同类实现（slkiser/opencode-quota 等）：分组/两级折叠/代表窗口/刷新与错误口径，及可借鉴清单。
 - `docs/superpowers/specs/2026-11-11-multi-provider-quota-design.md` — 额度区块展示全部已登录订阅的设计（发现/排序/折叠/验收）。
 - `docs/superpowers/specs/2026-11-11-heavy-dashboard-design.md` — HUD 5.0 重型仪表盘：审计结论、Obsidian Amber 视觉系统、37 列几何、额度新鲜度与子代理结局口径、ViewModel 拆分。
+- `docs/superpowers/specs/2026-11-11-quota-reset-relative-design.md` — 额度 `↻` 重置提示改为相对剩余时长、数据年龄 `0m` 的口径与验收。
 - `docs/reference-usage-monitor-refresh-cadence.md` — 外部高星用量监控项目的刷新间隔/退避样本与「网络端点 vs 本地读取」分档，用于判断本插件 5min 间隔是否合理。
 - `docs/reference-desktop-gui-plugins.md` — OpenCode Desktop GUI 插件（`./gui-experimental`）开发手册：构建/加载规则、窗口与主进程上下文、注册表、Ipc/存储/生命周期、排障；**§15 是 2.2.0 实机验证结论**（目录型插件三入口、server 可 import 什么、共用 RPC 契约、槽位真实跨度）。
 - `docs/design-desktop-entry.md` — 双入口设计与桌面 Markdown 配色的历史记录（**已冻结**）、恢复方式与后续 HUD 面板路线。
