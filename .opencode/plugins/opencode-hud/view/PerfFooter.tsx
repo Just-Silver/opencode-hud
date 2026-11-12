@@ -2,13 +2,13 @@
 // 落点：prompt.footer.status 的 append（目录路径之后、宿主 usage 之前），见
 // docs/design-performance-footer.md。不可点击、不弹窗。
 // 只展示「已完成步」的精确值：生成中沿用上一步的数字，步结束（宿主写回 tokens）时替换。
-// 视觉与 Dashboard 统一：首字弱化、速度用主色（同一组数字里更常用的那个）。
+// 视觉与 Dashboard 统一：首字与速度同色（正文白），只用弱化的「·」分隔。
 // ⚠️ 响应式约束：组件函数体只执行一次，禁止 props 快照 const。
 /** @jsxImportSource @opentui/solid */
 import { createMemo, Show, type JSX } from "solid-js"
 import { useTerminalDimensions } from "@opentui/solid"
 import { fmtPerf, fmtSec, fmtTpsText } from "../shared/format.ts"
-import { ACCENT_COLOR, MUTED_COLOR, TEXT_COLOR } from "./theme.ts"
+import { MUTED_COLOR, TEXT_COLOR } from "./theme.ts"
 
 // 两档阈值：≥60 完整（时长 · 速度），<60 只留速度（60 跟随宿主 showDetails 收缩位）
 const COMPACT_MIN_WIDTH = 60
@@ -48,7 +48,7 @@ export function PerfFooter(props: {
           </text>
         </Show>
         <Show when={tpsText()}>
-          <text fg={ACCENT_COLOR} wrapMode="none">
+          <text fg={TEXT_COLOR} wrapMode="none">
             {tpsText()}
           </text>
         </Show>

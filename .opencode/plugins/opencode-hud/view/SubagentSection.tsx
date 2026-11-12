@@ -200,6 +200,9 @@ function Counts(props: {
         <text
           fg={TEXT_COLOR}
           wrapMode="none"
+          // 点击落在文本上会先起一段文本选区：这一行左边全是计数，选中就整行高亮。
+          // 收起是操作不是内容，不参与选择。
+          selectable={false}
           onMouseDown={(event: { stopPropagation(): void }) => {
             event.stopPropagation()
             props.onCollapse()
