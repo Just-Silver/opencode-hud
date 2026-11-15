@@ -244,10 +244,15 @@ export class QuotaStore {
     })().finally(() => {
       // 先清在途标记再通知：展示层的 fetching 直接读 inFlight，
       // 在清掉之前通知会把界面钉在「有数据 + 仍在途」的快照上（「更新中」要等下一次心跳才撤）。
+      // 与下面的开始通知成对出现：开始（fetching=true）→ 落定（fetching=false + 新截止时刻）。
       this.inFlight.delete(pid)
       this.bump()
     })
     this.inFlight.set(pid, p)
+    // 请求真正开始时立刻通知一次：展示层的 fetching 直接读 inFlight，只在落定时通知的话
+    // 「更新中」永远看不到（倒计时归零后界面会停在 00:00 直到请求结束）。
+    // 放到 inFlight 写入之后，订阅者读到的状态才是「在途」；并发等待者不会走到这里，不会重复通知。
+    this.bump()
     return p
   }
 }

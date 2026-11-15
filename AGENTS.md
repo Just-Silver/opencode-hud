@@ -17,7 +17,7 @@
 
 # 校验（改完必跑）
 
-- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 206 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
+- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 209 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
 - 测试按 `node:test` 写，不要用 `bun test` 代替。
 - 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
@@ -66,7 +66,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - 未用真实响应验证前用 `enabled: false`；展示设计（显示哪几行、标签叫什么）先与用户确认。
 - 白名单、URL、fetcher 分发均按 `normID`（小写 + 仅保留 a-z）匹配；未注册/未启用返回 `undefined`，**无兜底**。
 - 凭据统一在 `quota/key.ts`：keyCache（60s TTL）→ 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 取 `active` 且最近更新的那条（`ORDER BY active DESC, time_updated DESC, id DESC`），按 `type` 取值：`key` → `key`，`oauth` → `access`；该条不可用时不回退旧记录。`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下；`openai` 的在 `integration_id="openai"`，且**只有 Codex 登录（`chatgpt-browser`/`headless`）的 token 能查额度**，token-sharing 一律 401（见 `docs/provider-openai-quota.md`）。只读现值，不刷新、不落盘、不写日志。
-- `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。**刷新调度不靠固定轮询**：`nextCheckAt(pid)` 是「下一次允许请求的绝对时刻」的唯一真源（`retryAt` → `at + backoff`），`useQuota` 用 `nextWakeAt()` 取最早目标 `setTimeout` 排到那一刻，60s 的 `QUOTA_TICK_MS` 只做凭据探测 + 补一次 `load`（漏排程兜底），请求频率仍由 store 决定。**通知订阅者必须在请求落定、`inFlight` 已清之后**（成功/失败/空响应都通知）：UI 的 `fetching` 直接读 `inFlight`，在清掉之前通知会把界面钉在「有数据 + 更新中」的快照上。**只有 `isQuotaProvider` 命中的 pid 才调 `load`**：未注册端点静默返回、不记日志（否则非额度供应商会被心跳刷成 `missing api url`）；`missing key` 的 warn 在同一凭据状态下只记一次（登录/切号换桶后重新计数）。
+- `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。**刷新调度不靠固定轮询**：`nextCheckAt(pid)` 是「下一次允许请求的绝对时刻」的唯一真源（`retryAt` → `at + backoff`），`useQuota` 用 `nextWakeAt()` 取最早目标 `setTimeout` 排到那一刻，60s 的 `QUOTA_TICK_MS` 只做凭据探测 + 补一次 `load`（漏排程兜底），请求频率仍由 store 决定。**通知订阅者两次**：请求真正开始时（`inFlight` 写入之后——否则「更新中」根本不会出现，倒计时归零后会停在 `00:00`）与落定之后（成功/失败/空响应都通知，且必须在 `inFlight` 清空之后，否则界面会被钉在「有数据 + 更新中」）。被间隔/退避跳过、命中并发等待的 `load` 不通知。**只有 `isQuotaProvider` 命中的 pid 才调 `load`**：未注册端点静默返回、不记日志（否则非额度供应商会被心跳刷成 `missing api url`）；`missing key` 的 warn 在同一凭据状态下只记一次（登录/切号换桶后重新计数）。
 - 网络请求统一走 `shared/http.ts`：5s 超时/中止、8MB 上限、`Retry-After`、401/429/超时/网络/坏 JSON 归类、错误文本先脱敏再截断。provider 不再直接 `fetch`。
 - 行内 `↻` 重置提示是**查询时刻的快照**：provider 在 fetch 时把 `resetsAt` 格式化成相对剩余时长（`12m` / `4h12m` / `5d`）塞进 `hint`，渲染层不重算。所以它最多滞后一个刷新周期，失败/退避期间可能更久（折叠态靠 `失败`/`旧` 前缀、展开态靠数据年龄兜底）。要真实倒计时得给契约加时间字段，属另一次设计。**别把它和组头的刷新倒计时搞混**：组头 `↻ 04:32` 是本插件下次去查额度的时刻（秒级、真实调度），`hint` 里的 `↻ 4h12m` 是供应商额度窗口重置时刻。
 - 额度区块展示**本机全部有凭据的已启用供应商**（`listProviders` + 凭据探测，5min TTL；无凭据不出现、不记日志）。排序：当前会话 → 本会话运行中子代理在用 → 其余注册顺序；只展开当前会话那组，其余折叠成一行、点击就地展开，折叠摘要取已用最多的一条。当前会话供应商没有额度查询时它不出行，**全部折叠**（不猜哪条重要）。手动展开态存模块级 Map，跨重建保持。

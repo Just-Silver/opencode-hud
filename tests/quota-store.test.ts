@@ -125,16 +125,40 @@ test("不同 pid 独立分桶", async () => {
 })
 
 // ─── 订阅通知（bump） ───
-test("订阅：写库触发监听器（成功路径 bump 一次）", async () => {
+test("订阅：一次真实请求通知两次 —— 开始时 fetching=true、落定时 fetching=false", async () => {
+  let release: (value: QuotaData | undefined) => void = () => {}
+  let calls = 0
+  const deps = makeDeps({
+    fetch: () => {
+      calls++
+      return new Promise<QuotaData | undefined>((resolve) => { release = resolve })
+    },
+  })
+  const store = new QuotaStore(deps)
+  const seen: boolean[] = []
+  store.subscribe(() => seen.push(store.status("opencode-go").fetching))
+
+  const loading = store.load("opencode-go")
+  await flush()
+  assert.deepEqual(seen, [true], "请求开始就要通知，否则「更新中」永远看不到")
+  assert.equal(store.status("opencode-go").phase, "loading")
+
+  release(okData)
+  assert.equal(await loading, true)
+  assert.deepEqual(seen, [true, false], "落定通知必须发生在 inFlight 清空之后")
+  assert.equal(calls, 1)
+})
+
+test("订阅：成功一次请求 = 开始 + 落定两次通知", async () => {
   const deps = makeDeps()
   const store = new QuotaStore(deps)
   let notified = 0
   store.subscribe(() => notified++)
   assert.equal(await store.load("opencode-go"), true)
-  assert.equal(notified, 1)
+  assert.equal(notified, 2)
 })
 
-test("订阅：请求失败或空响应也在落定时通知一次（「更新中」必须能立即撤销）", async () => {
+test("订阅：请求失败或空响应也在开始与落定时各通知一次（「更新中」必须能撤销）", async () => {
   const cases: Array<Partial<QuotaDeps>> = [
     { fetch: async () => { throw new Error("boom") } },
     { fetch: async () => undefined },
@@ -145,8 +169,46 @@ test("订阅：请求失败或空响应也在落定时通知一次（「更新�
     let notified = 0
     store.subscribe(() => notified++)
     await store.load("opencode-go")
-    assert.equal(notified, 1, `应通知一次: ${JSON.stringify(Object.keys(overrides))}`)
+    assert.equal(notified, 2, `应通知两次: ${JSON.stringify(Object.keys(overrides))}`)
+    assert.equal(store.status("opencode-go").fetching, false)
   }
+})
+
+test("订阅：被刷新间隔跳过的 load 不通知（没有真实请求就没有开始通知）", async () => {
+  let now = 1_000_000
+  const deps = makeDeps({ now: () => now })
+  const store = new QuotaStore(deps)
+  let notified = 0
+  store.subscribe(() => notified++)
+  await store.load("opencode-go")
+  assert.equal(notified, 2)
+  now += 60_000 // 间隔内：跳过
+  assert.equal(await store.load("opencode-go"), false)
+  assert.equal(notified, 2)
+})
+
+test("订阅：并发去重时只有一个请求的开始通知，不会双发", async () => {
+  let release: (value: QuotaData | undefined) => void = () => {}
+  let calls = 0
+  const deps = makeDeps({
+    fetch: () => {
+      calls++
+      return new Promise<QuotaData | undefined>((resolve) => { release = resolve })
+    },
+  })
+  const store = new QuotaStore(deps)
+  let notified = 0
+  store.subscribe(() => notified++)
+  const first = store.load("opencode-go")
+  await flush()
+  const second = store.load("opencode-go") // 命中 inFlight：等待，不再发请求
+  await flush()
+  assert.equal(notified, 1)
+  release(okData)
+  assert.equal(await first, true)
+  assert.equal(await second, true)
+  assert.equal(notified, 2)
+  assert.equal(calls, 1)
 })
 
 test("订阅：missing key 既不请求也不通知", async () => {
@@ -164,13 +226,13 @@ test("订阅：退订后不再通知", async () => {
   let notified = 0
   const off = store.subscribe(() => notified++)
   await store.load("a-go")
-  assert.equal(notified, 1)
+  assert.equal(notified, 2)
   off()
   await store.load("b-go")
-  assert.equal(notified, 1) // 退订后 b-go 写库不再通知
+  assert.equal(notified, 2) // 退订后 b-go 写库不再通知
 })
 
-test("订阅：多个订阅者全部收到", async () => {
+test("订阅：多个订阅者全部收到（开始 + 落定）", async () => {
   const deps = makeDeps()
   const store = new QuotaStore(deps)
   let a = 0
@@ -178,8 +240,8 @@ test("订阅：多个订阅者全部收到", async () => {
   store.subscribe(() => a++)
   store.subscribe(() => b++)
   await store.load("opencode-go")
-  assert.equal(a, 1)
-  assert.equal(b, 1)
+  assert.equal(a, 2)
+  assert.equal(b, 2)
 })
 
 // ─── force 绕过限流（timer 轮询用） ───
