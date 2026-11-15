@@ -2,14 +2,14 @@
 import { createHash } from "node:crypto"
 import { QuotaRequestError, redactSecrets, type QuotaErrorCode } from "../shared/http.ts"
 import { normID } from "../shared/id.ts"
-import { fmtAge } from "../shared/format.ts"
+import { fmtAge, fmtCountdown } from "../shared/format.ts"
 import type { QuotaData, QuotaItem, QuotaStatus } from "./types.ts"
 
 // 网络刷新最小间隔：额度接口按次计费/限流，60s 强刷不划算。
 export const QUOTA_REFRESH_MS = 5 * 60_000
 // 超过这个年龄的缓存视为过期：正常 5min 刷新下不会发生，说明刷新连续失败或进程被挂起。
 export const QUOTA_STALE_MS = 2 * QUOTA_REFRESH_MS
-// UI 侧检查心跳：每分钟看一次凭据与退避，真正是否发请求由上面的间隔决定。
+// 兜底心跳：只做凭据探测与「到点没被唤醒」的补漏，不决定请求节奏（请求节奏由 nextCheckAt 排程）。
 export const QUOTA_TICK_MS = 60_000
 const BACKOFF_BASE_MS = 5 * 60_000
 const BACKOFF_MAX_MS = 15 * 60_000
@@ -100,14 +100,25 @@ export class QuotaStore {
     return this.entries.get(pid)?.error
   }
 
+  // 下一次允许发起请求的绝对时刻（只读）。UI 的倒计时与调度都读它，不在别处重算退避公式。
+  // undefined = 无法确定：未注册端点 / 还没解析到凭据 / 从未尝试 / 在途（落定后重新排程）。
+  nextCheckAt(pid: string): number | undefined {
+    if (!this.deps.apiUrlFor(pid)) return undefined
+    const entry = this.entries.get(pid)
+    if (!entry) return undefined
+    if (this.inFlight.has(pid)) return undefined
+    if (entry.fingerprint === "") return undefined // 没凭据：等凭据探测发现登录，不空转
+    if (entry.retryAt !== undefined) return entry.retryAt // 服务端 Retry-After 优先于本地退避
+    if (entry.at === undefined) return undefined
+    return entry.at + (entry.failures > 0 ? backoffMs(entry.failures) : QUOTA_REFRESH_MS)
+  }
+
   // 展示层新鲜度：只读快照，不触发请求。
   // phase 与 error 都来自同一条 entry，因此「有缓存 + 刷新失败」会同时给出 data 与 error。
   status(pid: string, now: number = this.now()): QuotaStatus {
     const entry = this.entries.get(pid)
     const hasData = entry?.data !== undefined
-    const ageMs =
-      entry?.updatedAt === undefined ? undefined : Math.max(0, now - entry.updatedAt)
-    const stale = hasData && ageMs !== undefined && ageMs > QUOTA_STALE_MS
+    const { ageMs, stale } = quotaAge(entry?.updatedAt, now)
     const fetching = this.inFlight.has(pid)
     const phase = hasData
       ? entry?.error
@@ -120,12 +131,15 @@ export class QuotaStore {
         : entry?.error
           ? "error"
           : "empty"
+    const nextRefreshAt = this.nextCheckAt(pid)
     return {
       phase,
       hasData,
       fetching,
       ...(ageMs === undefined ? {} : { ageMs }),
       stale,
+      ...(entry?.updatedAt === undefined ? {} : { updatedAt: entry.updatedAt }),
+      ...(nextRefreshAt === undefined ? {} : { nextRefreshAt }),
       ...(entry?.error === undefined ? {} : { error: entry.error }),
     }
   }
@@ -335,23 +349,60 @@ export function quotaErrorLabel(error: { code?: string } | undefined): string | 
 export type QuotaTrailTone = "muted" | "accent" | "danger"
 export type QuotaTrail = { text: string; tone: QuotaTrailTone }
 
-// 组头右端的状态注记（摘要文本由 UI 自己拼在后面）：
-//   展开 → 更新中 / 失败原因 / 数据年龄（过期转琥珀）
-//   折叠 → 失败 / 旧（没有这些状态时不占位，折叠行右端留给摘要）
-// 没有任何可说的状态 → undefined（不让「刚刷新过」这种常态占宽）。
-export function quotaStatusTrail(status: QuotaStatus, open: boolean): QuotaTrail | undefined {
-  // 折叠行只给异常前缀：后台刷新是常态，为「更新中」挤掉摘要/重置时间不划算
+// 多供应商共用一条心跳：下一次需要唤醒的绝对时刻取最早的一个；没有可排程目标 → undefined。
+export function nextWakeAt(times: readonly (number | undefined)[]): number | undefined {
+  let next: number | undefined
+  for (const at of times) {
+    if (at === undefined) continue
+    if (next === undefined || at < next) next = at
+  }
+  return next
+}
+
+// 数据年龄/过期：唯一计算入口。快照（status）与逐秒展示（quotaStatusTrail）都走它，
+// 不允许出现第二套公式，否则「刚刷新」和「已过期」会各说各话。
+export function quotaAge(updatedAt: number | undefined, now: number): { ageMs: number | undefined; stale: boolean } {
+  if (updatedAt === undefined) return { ageMs: undefined, stale: false }
+  const ageMs = Math.max(0, now - updatedAt)
+  return { ageMs, stale: ageMs > QUOTA_STALE_MS }
+}
+
+function remainingOf(at: number | undefined, now: number): number | undefined {
+  return at === undefined ? undefined : at - now
+}
+
+// 组头右端的状态注记（摘要文本由 UI 自己拼在后面）。展开态永远有内容，它就是 HUD 的心跳：
+//   更新中 → 失败原因 + 真实重试倒计时 → 缓存过期 → 下次刷新倒计时 → 数据年龄（兜底）
+// 折叠行只给异常前缀：后台刷新是常态，为倒计时挤掉摘要/重置时间不划算。
+// now 来自共享秒级时钟：年龄与过期都按 updatedAt 现算，不吃构建行时的快照。
+export function quotaStatusTrail(
+  status: QuotaStatus,
+  open: boolean,
+  now: number = Date.now(),
+): QuotaTrail | undefined {
+  const { ageMs, stale } = quotaAge(status.updatedAt, now)
   if (!open) {
     if (status.error) return { text: "失败", tone: "danger" }
-    if (status.stale) return { text: "旧", tone: "accent" }
+    if (stale) return { text: "旧", tone: "accent" }
     return undefined
   }
-  if (status.fetching) return { text: "更新中", tone: "accent" }
-  if (status.error && status.hasData) {
+  if (status.fetching) return { text: "↻ 更新中", tone: "accent" }
+  if (status.error) {
     const label = quotaErrorLabel(status.error) ?? "查询失败"
-    const age = fmtAge(status.ageMs)
+    // 「查询失败」没有额外信息量，换成「重试」更贴切；凭据失效/限流这类具体原因原样保留
+    const prefix = label === "查询失败" ? "重试" : label
+    const countdown = fmtCountdown(remainingOf(status.nextRefreshAt, now))
+    if (countdown) return { text: `${prefix} ${countdown}`, tone: "danger" }
+    const age = fmtAge(ageMs)
     return { text: age ? `${label} ${age}` : label, tone: "danger" }
   }
-  if (status.ageMs === undefined) return undefined
-  return { text: fmtAge(status.ageMs), tone: status.stale ? "accent" : "muted" }
+  if (stale) {
+    const age = fmtAge(ageMs)
+    return { text: age ? `旧 ${age}` : "旧", tone: "accent" }
+  }
+  // 无法确定下次刷新（没凭据/端点未注册）时只说实际年龄，不伪造 05:00
+  const countdown = fmtCountdown(remainingOf(status.nextRefreshAt, now))
+  if (countdown) return { text: `↻ ${countdown}`, tone: "muted" }
+  const age = fmtAge(ageMs)
+  return age ? { text: age, tone: "muted" } : undefined
 }

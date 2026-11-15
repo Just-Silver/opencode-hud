@@ -3,7 +3,7 @@
 // 展开区用一条左侧竖线（BORDER 色）+ 内缩做「背景层级」，不加第二层边框/底色块。
 // ⚠️ 响应式约束：组件函数体只执行一次，取值须在 JSX 表达式或惰性 getter 中。
 /** @jsxImportSource @opentui/solid */
-import { Index, Show, type JSX } from "solid-js"
+import { createMemo, Index, Show, type JSX } from "solid-js"
 import { quotaStatusTrail, representativeItem } from "../model/quota.ts"
 import type { QuotaRow } from "../model/types.ts"
 import { fmtPctInt, quotaPct, quotaSummaryText, truncateVisual, visualWidth } from "../shared/format.ts"
@@ -28,18 +28,26 @@ function trailColor(tone: "muted" | "accent" | "danger"): string {
   return MUTED_COLOR
 }
 
-function QuotaGroup(props: { row: QuotaRow; onToggle: (pid: string) => void }): JSX.Element {
+function QuotaGroup(props: {
+  row: QuotaRow
+  now: () => number
+  onToggle: (pid: string) => void
+}): JSX.Element {
   // 摘要条目只取一次：百分比取色与摘要文本共用，避免同一轮渲染重复挑选
   const item = () => representativeItem(props.row.data.items)
   const pct = () => quotaPct(item())
   const name = () => truncateVisual(props.row.name, QUOTA_GROUP_NAME_MAX)
-  const trail = () => quotaStatusTrail(props.row.status, props.row.open)
-  // 折叠行右端预算：内容宽 − 箭头 2 − 名称列 − 状态注记（含 1 列间隔）
-  const summaryText = () => {
-    const statusText = trail()?.text
+  // 读共享秒级时钟：只有这一处让「组头右端」逐秒变化（倒计时 / 重试 / 更新中）。
+  // 拆成两个字符串 memo：文本每秒变，颜色很少变 → 颜色属性不会被秒级心跳反复重设。
+  const trailText = createMemo(() => quotaStatusTrail(props.row.status, props.row.open, props.now())?.text ?? "")
+  const trailTone = createMemo(() => quotaStatusTrail(props.row.status, props.row.open, props.now())?.tone ?? "muted")
+  // 折叠行右端预算：内容宽 − 箭头 2 − 名称列 − 状态注记（含 1 列间隔）。
+  // 用 memo 吃字符串比较：倒计时每秒变化时摘要不会跟着重算/重绘。
+  const summaryText = createMemo(() => {
+    const statusText = trailText()
     const used = 2 + QUOTA_GROUP_NAME_MAX + (statusText ? visualWidth(statusText) + 1 : 0)
     return truncateVisual(quotaSummaryText(item()), Math.max(4, CARD_INNER - used))
-  }
+  })
 
   return (
     <box flexDirection="column">
@@ -52,12 +60,12 @@ function QuotaGroup(props: { row: QuotaRow; onToggle: (pid: string) => void }): 
           </text>
         </Show>
         <box flexGrow={1} />
-        {/* 展开时右端是新鲜度；折叠时右端是摘要（状态注记在摘要前） */}
-        <Show when={trail()}>
-          {(value) => <text fg={trailColor(value().tone)}>{value().text}</text>}
+        {/* 展开时右端是刷新倒计时/异常；折叠时右端是摘要（状态注记在摘要前） */}
+        <Show when={trailText()}>
+          <text fg={trailColor(trailTone())}>{trailText()}</text>
         </Show>
         <Show when={!props.row.open && quotaSummaryText(item())}>
-          <Show when={trail()}>
+          <Show when={trailText()}>
             <text> </text>
           </Show>
           <text fg={usageColor(pct())} wrapMode="none">
@@ -79,14 +87,20 @@ function QuotaGroup(props: { row: QuotaRow; onToggle: (pid: string) => void }): 
   )
 }
 
-export function QuotaSection(props: { rows: QuotaRow[]; onToggle: (pid: string) => void }): JSX.Element {
+export function QuotaSection(props: {
+  rows: QuotaRow[]
+  now: () => number
+  onToggle: (pid: string) => void
+}): JSX.Element {
   return (
     // 空列表 → 整个额度卡片不渲染（没有可用额度数据即隐藏，不留「无数据」占位）
     <Show when={props.rows.length > 0}>
       <DashboardCard title={SECTION_QUOTA_TITLE}>
         {/* 紧凑排布：组头 / 条目 / 下一组紧邻，不插空行（37 列侧栏优先信息密度） */}
         <box flexDirection="column">
-          <Index each={props.rows}>{(row) => <QuotaGroup row={row()} onToggle={props.onToggle} />}</Index>
+          <Index each={props.rows}>
+            {(row) => <QuotaGroup row={row()} now={props.now} onToggle={props.onToggle} />}
+          </Index>
         </box>
       </DashboardCard>
     </Show>

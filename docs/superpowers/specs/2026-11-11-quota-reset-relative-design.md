@@ -6,6 +6,7 @@
 - 状态：**已实现**（2026-11-12）
 - 落点：`shared/format.ts` 的 `fmtResetTime` / `fmtResetHint` / `fmtAge`；provider 与渲染器不改
 - 规模：小改动（2 个函数 + 单测）
+- 后续：组头右端已由「数据年龄」改为「下次刷新倒计时」（`↻ 04:32`），见 `docs/superpowers/specs/2026-11-15-quota-refresh-countdown.md`；本文的 `↻` 重置提示（额度窗口）口径不受影响。
 
 ## 1. 背景
 

@@ -7,6 +7,7 @@ import {
   AGENT_INSPECTOR_INNER,
   AGENT_TITLE_MAX,
   CARD_INNER,
+  QUOTA_GROUP_NAME_MAX,
 } from "../.opencode/plugins/opencode-hud/view/layout.ts"
 import { visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
 
@@ -22,4 +23,13 @@ test("子代理 Task Inspector：三组双列在最窄版心内同行", () => {
   assert.ok(AGENT_INSPECTOR_INNER < CARD_INNER, "详情版心必须窄于卡片内容（运行中卡片还要减去强调线与内边距）")
   // 主行标题列不能被数字列挤到不可用
   assert.ok(AGENT_TITLE_MAX >= 12, `标题列只剩 ${AGENT_TITLE_MAX} 列，短标题也会频繁截断`)
+})
+
+test("额度组头：箭头 + 名称列 + 状态注记（倒计时/重试）在同一行内", () => {
+  // 与 QuotaGroup 一致：箭头 2 + 名称（最多 14）+ 至少 1 列间隔 + 注记
+  const headerWidth = (trail: string) => 2 + QUOTA_GROUP_NAME_MAX + 1 + visualWidth(trail)
+  const cases = ["↻ 04:32", "↻ 01:00:00", "↻ 更新中", "重试 09:28", "限流 09:28", "凭据失效 09:28", "网络异常 15:00", "旧 12m", "旧 4d"]
+  for (const trail of cases) {
+    assert.ok(headerWidth(trail) <= CARD_INNER, `组头超宽（${headerWidth(trail)} > ${CARD_INNER}）：${trail}`)
+  }
 })

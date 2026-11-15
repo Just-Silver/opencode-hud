@@ -7,6 +7,7 @@ import { dirname, join } from "node:path"
 import { createRegistry, type ProviderRegistration } from "../.opencode/plugins/opencode-hud/quota/registry.ts"
 import {
   isQuotaRowOpen,
+  nextWakeAt,
   orderQuotaProviders,
   quotaErrorLabel,
   quotaStatusTrail,
@@ -192,12 +193,16 @@ test("listProviders：保持注册顺序（发现顺序），不排序", () => {
 })
 
 // ─── 新鲜度展示（纯函数） ───
+// 所有用例共用一个绝对「现在」，倒计时/年龄都从 updatedAt / nextRefreshAt 现算
+const NOW = 1_000_000
 const statusOf = (over: Partial<import("../.opencode/plugins/opencode-hud/model/types.ts").QuotaStatus> = {}) => ({
   phase: "ready" as const,
   hasData: true,
   fetching: false,
   ageMs: 3 * 60_000,
   stale: false,
+  updatedAt: NOW - 3 * 60_000,
+  nextRefreshAt: NOW + 4 * 60_000 + 32_000,
   ...over,
 })
 
@@ -212,47 +217,107 @@ test("quotaErrorLabel：失败原因归成短标签（不含英文/密钥细节�
   assert.equal(quotaErrorLabel(undefined), undefined)
 })
 
-test("quotaStatusTrail：展开时给数据年龄，过期转琥珀", () => {
-  assert.deepEqual(quotaStatusTrail(statusOf(), true), { text: "3m", tone: "muted" })
-  assert.deepEqual(quotaStatusTrail(statusOf({ stale: true, ageMs: 12 * 60_000 }), true), {
-    text: "12m",
-    tone: "accent",
+test("quotaStatusTrail：展开时正常态是下次刷新倒计时（不是数据年龄）", () => {
+  assert.deepEqual(quotaStatusTrail(statusOf(), true, NOW), { text: "↻ 04:32", tone: "muted" })
+})
+
+test("quotaStatusTrail：倒计时按绝对时刻现算，每秒递减、休眠跳跃不漂移", () => {
+  const status = statusOf()
+  const at = (ms: number) => quotaStatusTrail(status, true, NOW + ms)?.text
+  assert.equal(at(0), "↻ 04:32")
+  assert.equal(at(1_000), "↻ 04:31")
+  assert.equal(at(2_000), "↻ 04:30")
+  // 定时器延迟 3.7s：显示值直接对齐真实剩余（ceil 268.3s = 04:29），不是「上一秒 − 1」
+  assert.equal(at(3_700), "↻ 04:29")
+  // 系统休眠跨过截止时刻：不显示负数倒计时
+  assert.equal(at(4 * 60_000 + 32_000), "↻ 00:00")
+  // 跨过新鲜窗口（>10min）后过期提示优先：不把 13 分钟前的数据说成「马上刷新」
+  assert.equal(at(10 * 60_000), "旧 13m")
+  // 时间倒退（校时）：按真实剩余回涨，不吃历史状态
+  assert.equal(at(-60_000), "↻ 05:32")
+})
+
+test("quotaStatusTrail：≥1h 用 HH:MM:SS（定宽不抖动）", () => {
+  assert.deepEqual(quotaStatusTrail(statusOf({ nextRefreshAt: NOW + 3600_000 }), true, NOW), {
+    text: "↻ 01:00:00",
+    tone: "muted",
   })
 })
 
 test("quotaStatusTrail：展开时刷新中优先于年龄/错误（正在动作）", () => {
-  assert.deepEqual(quotaStatusTrail(statusOf({ fetching: true }), true), { text: "更新中", tone: "accent" })
+  assert.deepEqual(quotaStatusTrail(statusOf({ fetching: true }), true, NOW), { text: "↻ 更新中", tone: "accent" })
   assert.deepEqual(
-    quotaStatusTrail(statusOf({ fetching: true, error: { code: "network", message: "x" } }), true),
-    { text: "更新中", tone: "accent" },
+    quotaStatusTrail(statusOf({ fetching: true, error: { code: "network", message: "x" } }), true, NOW),
+    { text: "↻ 更新中", tone: "accent" },
   )
 })
 
 test("quotaStatusTrail：折叠时后台刷新不占位（把宽度留给摘要/重置时间）", () => {
-  assert.equal(quotaStatusTrail(statusOf({ fetching: true }), false), undefined)
+  assert.equal(quotaStatusTrail(statusOf({ fetching: true }), false, NOW), undefined)
   // 过期且正在刷新：仍要标「旧」，否则折叠行会把旧数据当新鲜
-  assert.deepEqual(quotaStatusTrail(statusOf({ fetching: true, stale: true }), false), {
-    text: "旧",
-    tone: "accent",
-  })
+  assert.deepEqual(
+    quotaStatusTrail(statusOf({ fetching: true, ageMs: 12 * 60_000, updatedAt: NOW - 12 * 60_000 }), false, NOW),
+    { text: "旧", tone: "accent" },
+  )
 })
 
-test("quotaStatusTrail：失败但有缓存 → 原因 + 缓存年龄（不隐藏旧数据）", () => {
+test("quotaStatusTrail：折叠行正常态不给倒计时（摘要优先）", () => {
+  assert.equal(quotaStatusTrail(statusOf(), false, NOW), undefined)
+})
+
+test("quotaStatusTrail：失败 → 真实重试倒计时，具体原因不被倒计时挤掉", () => {
+  const failing = (code: string) => statusOf({ phase: "error", error: { code, message: "x" }, nextRefreshAt: NOW + 9 * 60_000 + 28_000 })
+  assert.deepEqual(quotaStatusTrail(failing("provider_error"), true, NOW), { text: "重试 09:28", tone: "danger" })
+  assert.deepEqual(quotaStatusTrail(failing("login_expired"), true, NOW), { text: "凭据失效 09:28", tone: "danger" })
+  assert.deepEqual(quotaStatusTrail(failing("rate_limited"), true, NOW), { text: "限流 09:28", tone: "danger" })
+  // 秒级推进同样作用于重试倒计时
+  assert.equal(quotaStatusTrail(failing("provider_error"), true, NOW + 28_000)?.text, "重试 09:00")
+})
+
+test("quotaStatusTrail：失败但无法确定下次刷新 → 原因 + 缓存年龄（不伪造倒计时）", () => {
   assert.deepEqual(
-    quotaStatusTrail(statusOf({ phase: "error", error: { code: "login_expired", message: "401" }, ageMs: 8 * 60_000 }), true),
+    quotaStatusTrail(
+      statusOf({ phase: "error", error: { code: "login_expired", message: "401" }, ageMs: 8 * 60_000, updatedAt: NOW - 8 * 60_000, nextRefreshAt: undefined }),
+      true,
+      NOW,
+    ),
     { text: "凭据失效 8m", tone: "danger" },
   )
 })
 
-test("quotaStatusTrail：折叠时只有异常才占位（正常数据把宽度留给摘要）", () => {
-  assert.equal(quotaStatusTrail(statusOf(), false), undefined)
-  assert.deepEqual(quotaStatusTrail(statusOf({ stale: true }), false), { text: "旧", tone: "accent" })
+test("quotaStatusTrail：没有错误但缓存过期 → 保留过期提示（不说成正常倒计时）", () => {
   assert.deepEqual(
-    quotaStatusTrail(statusOf({ phase: "error", error: { code: "timeout", message: "t" } }), false),
+    quotaStatusTrail(statusOf({ stale: true, ageMs: 12 * 60_000, updatedAt: NOW - 12 * 60_000 }), true, NOW),
+    { text: "旧 12m", tone: "accent" },
+  )
+  assert.deepEqual(quotaStatusTrail(statusOf({ stale: true, ageMs: 4 * 24 * 3600_000, updatedAt: NOW - 4 * 24 * 3600_000 }), true, NOW), {
+    text: "旧 4d",
+    tone: "accent",
+  })
+})
+
+test("quotaStatusTrail：折叠时只有异常才占位（正常数据把宽度留给摘要）", () => {
+  assert.deepEqual(quotaStatusTrail(statusOf({ stale: true, ageMs: 12 * 60_000, updatedAt: NOW - 12 * 60_000 }), false, NOW), {
+    text: "旧",
+    tone: "accent",
+  })
+  assert.deepEqual(
+    quotaStatusTrail(statusOf({ phase: "error", error: { code: "timeout", message: "t" } }), false, NOW),
     { text: "失败", tone: "danger" },
   )
 })
 
-test("quotaStatusTrail：无缓存无错误（尚未取到）不硬凑文案", () => {
-  assert.equal(quotaStatusTrail(statusOf({ phase: "empty", hasData: false, ageMs: undefined }), true), undefined)
+test("quotaStatusTrail：无法确定下次刷新时退回数据年龄，无数据无错误不硬凑文案", () => {
+  assert.deepEqual(quotaStatusTrail(statusOf({ nextRefreshAt: undefined }), true, NOW), { text: "3m", tone: "muted" })
+  assert.equal(
+    quotaStatusTrail(statusOf({ phase: "empty", hasData: false, ageMs: undefined, updatedAt: undefined, nextRefreshAt: undefined }), true, NOW),
+    undefined,
+  )
+})
+
+test("nextWakeAt：多供应商取最早截止时刻，全无 → undefined", () => {
+  assert.equal(nextWakeAt([NOW + 5_000, undefined, NOW + 1_000]), NOW + 1_000)
+  assert.equal(nextWakeAt([NOW + 5_000]), NOW + 5_000)
+  assert.equal(nextWakeAt([]), undefined)
+  assert.equal(nextWakeAt([undefined, undefined]), undefined)
 })

@@ -1,7 +1,7 @@
 // ─── shared/ 共享帮助函数单元测试 ───
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { dividerLine, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, fmtAge, quotaPct, quotaSummaryText, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
+import { dividerLine, fmtCountdown, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, fmtAge, quotaPct, quotaSummaryText, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
 import { normID } from "../.opencode/plugins/opencode-hud/shared/id.ts"
 import { parseJson } from "../.opencode/plugins/opencode-hud/shared/jsonc.ts"
 
@@ -141,6 +141,28 @@ test("quotaSummaryText：标签 + 百分比/文本，带重置提示时一并显
   assert.equal(quotaSummaryText({ label: "周", percent: 69 }), "周 69%")
   assert.equal(quotaSummaryText({ label: "余额", text: "$12.3" }), "余额 $12.3")
   assert.equal(quotaSummaryText(undefined), "")
+})
+
+// ─── fmtCountdown：下次刷新的秒级倒计时 ───
+test("fmtCountdown：<1h 用 MM:SS，≥1h 用 HH:MM:SS，定宽补零", () => {
+  assert.equal(fmtCountdown(5 * 60_000), "05:00")
+  assert.equal(fmtCountdown(4 * 60_000 + 32_000), "04:32")
+  assert.equal(fmtCountdown(928_000), "15:28")
+  assert.equal(fmtCountdown(59 * 60_000 + 59_000), "59:59")
+  assert.equal(fmtCountdown(3600_000), "01:00:00")
+  assert.equal(fmtCountdown(3600_000 + 61_000), "01:01:01")
+  assert.equal(fmtCountdown(99 * 3600_000), "99:00:00")
+})
+
+test("fmtCountdown：向上取整，只有真正到点才 00:00", () => {
+  assert.equal(fmtCountdown(1_000), "00:01")
+  assert.equal(fmtCountdown(999), "00:01") // 还有 0.999s → 不能说归零
+  assert.equal(fmtCountdown(1), "00:01")
+  assert.equal(fmtCountdown(0), "00:00")
+  assert.equal(fmtCountdown(-5_000), "00:00") // 已过截止时刻（等唤醒/在途）
+  assert.equal(fmtCountdown(undefined), undefined)
+  assert.equal(fmtCountdown(Number.NaN), undefined)
+  assert.equal(fmtCountdown(Number.POSITIVE_INFINITY), undefined)
 })
 
 // ─── fmtAge：数据新鲜度短格式 ───

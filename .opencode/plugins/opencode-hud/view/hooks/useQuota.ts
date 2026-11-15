@@ -1,12 +1,15 @@
 // ─── ViewModel 片段：额度监控 ───
 // 发现（有凭据的已启用供应商）→ 排序（当前 → 运行中子代理在用 → 其余）→ 行集合（有数据才出现）。
-// 刷新间隔 / 退避 / Retry-After / 并发去重全部由 QuotaStore 负责，这里只按 60s 心跳调用。
+// 请求节奏由 QuotaStore 决定（最小间隔 / 失败退避 / Retry-After / 并发去重），这里只负责排程：
+//   · 精确唤醒：按 store 的 nextCheckAt 排到真实截止时刻，倒计时归零即发请求；
+//   · 兜底心跳：每 60s 探测一次凭据并补一次 load（发现登录 / 切号 / 漏排程）。
 import { createEffect, createMemo, createSignal, on, onCleanup } from "solid-js"
 import type { QuotaRow } from "../../model/types.ts"
 import type { QuotaDeps } from "../../model/quota.ts"
 import {
   getQuotaStore,
   isQuotaRowOpen,
+  nextWakeAt,
   orderQuotaProviders,
   QUOTA_REFRESH_MS,
   QUOTA_TICK_MS,
@@ -15,6 +18,10 @@ import {
 import { fetchQuota, getProviderApiUrl, getProviderName, getProviderRenderer, isQuotaProvider, listProviders } from "../../quota/index.ts"
 import { resolveProviderKey } from "../../quota/key.ts"
 import { normID } from "../../shared/id.ts"
+import { useSecondClock } from "./useClock.ts"
+
+// 已到点的目标被再次叫醒时的最小间隔：防止「时刻没前进」时 setImmediate 式空转
+const MIN_WAKE_MS = 250
 
 // 进程内单例（跨 render 持久；deps 仅首次创建时生效）
 let store: ReturnType<typeof getQuotaStore> | undefined
@@ -48,9 +55,9 @@ export function useQuota(opts: {
 
   const [storeVer, setStoreVer] = createSignal(0)
   const [openVer, setOpenVer] = createSignal(0)
-  // 新鲜度（数据年龄/过期）需要自己的心跳：store 只在写库时通知
-  const [clock, setClock] = createSignal(0)
   const [available, setAvailable] = createSignal<string[]>(probedHits)
+  // 共享秒级心跳：只喂右侧倒计时文本，不进行数据构建（见下面的 rows）
+  const clock = useSecondClock()
 
   // 候选 = 本机有凭据的已启用供应商；5min TTL 只回答「有没有 token」，能否查额度交给首次请求
   const probe = async () => {
@@ -80,11 +87,16 @@ export function useQuota(opts: {
     }),
   )
 
+  // 只有注册了额度端点的供应商需要调度：其他供应商 load 只会刷日志
+  const quotaTargets = () => targets().filter((pid) => isQuotaProvider(pid))
+
   const rows = createMemo<QuotaRow[]>(() => {
     void storeVer() // 写库通知
     void openVer() // 展开态
-    void clock() // 数据年龄 / 过期判定
+    // 不读 clock：status 里带的是绝对时刻（updatedAt / nextRefreshAt），
+    // 逐秒变化只发生在渲染倒计时的那一个文本节点上，不重建行、不重跑 renderer。
     const currentPid = opts.currentPid()
+    const now = Date.now()
     const base = targets().flatMap((pid) => {
       const data = quota.get(pid)
       if (!data || data.items.length === 0) return [] // 无数据不出现（含空条目）
@@ -96,7 +108,7 @@ export function useQuota(opts: {
           data,
           current: currentPid !== undefined && normID(pid) === normID(currentPid),
           open: false,
-          status: quota.status(pid),
+          status: quota.status(pid, now),
         },
       ]
     })
@@ -112,33 +124,61 @@ export function useQuota(opts: {
     setOpenVer((v) => v + 1)
   }
 
-  // 订阅 store 写库通知：任何组件发起的 load 写库后当前组件都会刷新
+  // ── 刷新调度 ──
+  let wake: ReturnType<typeof setTimeout> | undefined
+  let disposed = false
+
+  function clearWake() {
+    if (wake !== undefined) clearTimeout(wake)
+    wake = undefined
+  }
+
+  // 排到最早的真实截止时刻：倒计时与调度读同一个 nextCheckAt，不存在归零后干等心跳
+  function scheduleWake() {
+    clearWake()
+    if (disposed) return
+    const next = nextWakeAt(quotaTargets().map((pid) => quota.nextCheckAt(pid)))
+    if (next === undefined) return
+    wake = setTimeout(kick, Math.max(MIN_WAKE_MS, next - Date.now()))
+  }
+
+  // 逐供应商 load（是否真发请求由 store 判定）；全部落定后再排程，读到的才是请求后的截止时刻
+  function kick() {
+    if (disposed) return
+    const jobs = quotaTargets().map((pid) => quota.load(pid))
+    if (jobs.length === 0) {
+      scheduleWake()
+      return
+    }
+    void Promise.allSettled(jobs).then(() => scheduleWake())
+  }
+
+  // 订阅 store 落定（成功/失败/空响应/切号）→ 刷新行数据 + 重排下一次检查
   onCleanup(
     quota.subscribe(() => {
       setStoreVer((v: number) => v + 1)
+      scheduleWake()
     }),
   )
-
-  // 只对已注册的额度供应商加载：其他供应商没有查询端点，调用只会产生日志噪音
-  const load = (pid: string | undefined) => {
-    if (pid && isQuotaProvider(pid)) void quota.load(pid)
-  }
 
   // 目标集合变化才加载（目标数组每轮都是新引用，用 key 压掉无意义的重跑）
   const targetKey = createMemo(() => targets().join("\u0000"))
   createEffect(
     on(targetKey, () => {
-      for (const pid of targets()) load(pid)
+      kick()
     }),
   )
 
-  // 每 60s：探测凭据（TTL 内直接返回）+ 逐供应商 load（是否真请求由 store 决定）+ 刷新数据年龄
-  const timer = setInterval(() => {
-    void probe()
-    for (const pid of targets()) load(pid)
-    setClock((v) => v + 1)
+  // 兜底心跳：凭据探测 + 补一次 load（到点没被唤醒时最多晚 60s）；请求节奏仍由 nextCheckAt 决定
+  const tickTimer = setInterval(() => {
+    void probe().then(kick)
   }, QUOTA_TICK_MS)
-  onCleanup(() => clearInterval(timer))
 
-  return { rows, toggle }
+  onCleanup(() => {
+    disposed = true
+    clearWake()
+    clearInterval(tickTimer)
+  })
+
+  return { rows, toggle, now: clock }
 }

@@ -12,12 +12,12 @@
   - `prompt.footer.status` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度）
 - 桌面 GUI 入口（`gui-experimental.cjs`）与 Markdown 配色**已冻结并删除**，当前只服务 TUI；恢复方式与设计见 `docs/design-desktop-entry.md`。
 - **宿主源码在本机**：`D:\Code\Projects\Agents\opencode`（opencode 2.x 工作树，版本以它 `package.json` 为准）。核对宿主 API、slot 跨度、键位、内置 UI 行为时直接读这里（`packages/tui/src`、`packages/plugin/src`、`packages/client/src`、`packages/schema/src`），**不要先搜网**；文档里引用的 `packages/...` 行号即指这个目录。
-- 目录职责：`model/` = 数据与纯函数；`quota/` = 供应商发现 + 凭据 + 查询；`shared/` = 通用纯函数；`view/` = Solid UI；`view/hooks/` = ViewModel（会话用量 / 子代理 / 额度 / 更新各一块）；`view/layout.ts` = 侧边栏几何常量唯一真源；`update/` = 更新检查与一键更新。
+- 目录职责：`model/` = 数据与纯函数；`quota/` = 供应商发现 + 凭据 + 查询；`shared/` = 通用纯函数；`view/` = Solid UI；`view/hooks/` = ViewModel（会话用量 / 子代理 / 额度 / 更新 / 共享秒级时钟）；`view/layout.ts` = 侧边栏几何常量唯一真源；`update/` = 更新检查与一键更新。
 - **相对导入必须带 `.ts`/`.tsx` 后缀**：运行时由 Bun 逐文件直接 import，没有打包器做后缀解析。
 
 # 校验（改完必跑）
 
-- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 189 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
+- 全量测试：`node --test tests/*.test.ts`（Node ≥23.6 原生 TS strip，零依赖；当前 206 个用例，全部须过）。单文件可用 `node --test tests/perf.test.ts`。
 - 测试按 `node:test` 写，不要用 `bun test` 代替。
 - 打包语法检查（Windows PowerShell；`Done in` 即通过）：
 
@@ -47,6 +47,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 
 - **组件函数体只执行一次**：禁止 `const x = props.x` 这类 props 快照；取值放 JSX 表达式，或用惰性 getter（`const pct = () => quotaPct(props.item)`）。额度不显示、上下文进度条不刷新都踩过这个坑。
 - 周期性重算的行列表用 `<Index>`（子代理区块）；`<For>` 按引用比较会销毁重建整行，清掉用户选中/滚动。数据只在数据源变化时更新的列表（如 `bars` 的 items）可以用 `<For>`。
+- **秒级心跳只喂单个文本节点**：`view/hooks/useClock.ts` 是唯一秒级时钟（引用计数，最后一个消费者卸载即停），倒计时/年龄用「绝对时刻 − now」现算；`rows()` 不许读时钟，否则每秒重建全部额度行、重跑供应商 renderer。
 - **宿主侧栏为 42 列，本插件可用 37 列**（`42 − 宿主 padding 4 − scrollbox 预留 1`，见 `packages/tui/src/routes/session/sidebar.tsx`）。卡片一圈圆角边框（2 列）+ 左右内边距（2 列）→ 内容 **33 列**；所有几何常量只在 `view/layout.ts` 定义，**不要用 `onSizeChange` 实测**（首帧为 0，会让标题在两种截断宽度间闪）。
 - 视觉分层两种底色：`CARD_COLOR`（HUD 连续表面 + 卡片底）→ `RAISED_COLOR`（指标块/运行中任务）。卡片之间的空行也用 `CARD_COLOR`，不要露更暗的间隙（会有「断层」感）。区块用 `DashboardCard`：**一卡一圈 `borderStyle="rounded"` 边框 + 边框内标题（box `title`）**，不要再叠第二层边框/分隔线，也不要在卡片下垫色块。
 - 卡片**不做整卡折叠**（折叠后只剩空边框）；区块内折叠（额度分组、子代理详情与历史段）保留。
@@ -65,12 +66,12 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - 未用真实响应验证前用 `enabled: false`；展示设计（显示哪几行、标签叫什么）先与用户确认。
 - 白名单、URL、fetcher 分发均按 `normID`（小写 + 仅保留 a-z）匹配；未注册/未启用返回 `undefined`，**无兜底**。
 - 凭据统一在 `quota/key.ts`：keyCache（60s TTL）→ 项目配置（近到远，同目录 `.opencode/` 优先）→ 全局配置 → DB `credential` 表。DB 取 `active` 且最近更新的那条（`ORDER BY active DESC, time_updated DESC, id DESC`），按 `type` 取值：`key` → `key`，`oauth` → `access`；该条不可用时不回退旧记录。`opencode`/`opencode-go` 的 OAuth 凭据都挂在 `integration_id="opencode"` 下；`openai` 的在 `integration_id="openai"`，且**只有 Codex 登录（`chatgpt-browser`/`headless`）的 token 能查额度**，token-sharing 一律 401（见 `docs/provider-openai-quota.md`）。只读现值，不刷新、不落盘、不写日志。
-- `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。Sidebar 每 60s 用 `QUOTA_TICK_MS` 检查一次（凭据/退避），是否符合刷新间隔由 store 决定，切回会话走缓存。**通知订阅者必须在请求落定、`inFlight` 已清之后**（成功/失败/空响应都通知）：UI 的 `fetching` 直接读 `inFlight`，在清掉之前通知会把界面钉在「有数据 + 更新中」的快照上，直到下一次 60s 心跳才撤销。**只有 `isQuotaProvider` 命中的 pid 才调 `load`**：未注册端点静默返回、不记日志（否则非额度供应商会被 60s 心跳刷成 `missing api url`）；`missing key` 的 warn 在同一凭据状态下只记一次（登录/切号换桶后重新计数）。
+- `QuotaStore` 按 providerID 分桶：网络刷新最小间隔 5min（`QUOTA_REFRESH_MS`），失败按 5→10→15min 退避并遵守 `Retry-After`；缓存按凭据指纹分桶，切号后旧数据立即作废。**刷新调度不靠固定轮询**：`nextCheckAt(pid)` 是「下一次允许请求的绝对时刻」的唯一真源（`retryAt` → `at + backoff`），`useQuota` 用 `nextWakeAt()` 取最早目标 `setTimeout` 排到那一刻，60s 的 `QUOTA_TICK_MS` 只做凭据探测 + 补一次 `load`（漏排程兜底），请求频率仍由 store 决定。**通知订阅者必须在请求落定、`inFlight` 已清之后**（成功/失败/空响应都通知）：UI 的 `fetching` 直接读 `inFlight`，在清掉之前通知会把界面钉在「有数据 + 更新中」的快照上。**只有 `isQuotaProvider` 命中的 pid 才调 `load`**：未注册端点静默返回、不记日志（否则非额度供应商会被心跳刷成 `missing api url`）；`missing key` 的 warn 在同一凭据状态下只记一次（登录/切号换桶后重新计数）。
 - 网络请求统一走 `shared/http.ts`：5s 超时/中止、8MB 上限、`Retry-After`、401/429/超时/网络/坏 JSON 归类、错误文本先脱敏再截断。provider 不再直接 `fetch`。
-- 行内 `↻` 重置提示是**查询时刻的快照**：provider 在 fetch 时把 `resetsAt` 格式化成相对剩余时长（`12m` / `4h12m` / `5d`）塞进 `hint`，渲染层不重算。所以它最多滞后一个刷新周期，失败/退避期间可能更久（折叠态靠 `失败`/`旧` 前缀、展开态靠数据年龄兜底）。要真实倒计时得给契约加时间字段，属另一次设计。
+- 行内 `↻` 重置提示是**查询时刻的快照**：provider 在 fetch 时把 `resetsAt` 格式化成相对剩余时长（`12m` / `4h12m` / `5d`）塞进 `hint`，渲染层不重算。所以它最多滞后一个刷新周期，失败/退避期间可能更久（折叠态靠 `失败`/`旧` 前缀、展开态靠数据年龄兜底）。要真实倒计时得给契约加时间字段，属另一次设计。**别把它和组头的刷新倒计时搞混**：组头 `↻ 04:32` 是本插件下次去查额度的时刻（秒级、真实调度），`hint` 里的 `↻ 4h12m` 是供应商额度窗口重置时刻。
 - 额度区块展示**本机全部有凭据的已启用供应商**（`listProviders` + 凭据探测，5min TTL；无凭据不出现、不记日志）。排序：当前会话 → 本会话运行中子代理在用 → 其余注册顺序；只展开当前会话那组，其余折叠成一行、点击就地展开，折叠摘要取已用最多的一条。当前会话供应商没有额度查询时它不出行，**全部折叠**（不猜哪条重要）。手动展开态存模块级 Map，跨重建保持。
 - 当前已启用：`opencode-go`（`/zen/go/v1/usage`）、`command-code`（credits + subscriptions 双 API）、`openai`（`chatgpt.com/backend-api/wham/usage`，5h/周 + 有月度额度时补「月」）。Zen 侧 `/zen/v1/usage` 为 404，所以 `opencode` 不接额度。
-- **新鲜度是展示元信息，不进供应商契约**：`QuotaStore` 记录 `updatedAt`（只在成功写入时更新，与「上次尝试 `at`」分离），`status(pid)` 返回 `phase`（`empty/loading/ready/stale/error`）、`fetching`、`ageMs`、`stale`、`error`；`QUOTA_STALE_MS = 2 × 刷新间隔`。UI 只消费这份状态（`quotaStatusTrail` / `quotaErrorLabel` 纯函数）：在途→`更新中`；展开且有缓存但失败→`凭据失效 8m`；折叠且失败/过期→`失败` / `旧` 前缀 + 摘要。**未取到数据不出行、失败不画 0%**；有缓存时失败仍展示缓存。
+- **新鲜度是展示元信息，不进供应商契约**：`QuotaStore` 记录 `updatedAt`（只在成功写入时更新，与「上次尝试 `at`」分离），`status(pid)` 返回 `phase`（`empty/loading/ready/stale/error`）、`fetching`、`ageMs`、`stale`、`updatedAt`、`nextRefreshAt`、`error`；`QUOTA_STALE_MS = 2 × 刷新间隔`。UI 只消费这份状态（`quotaStatusTrail` / `quotaErrorLabel` / `fmtCountdown` 纯函数）：展开态优先 在途`↻ 更新中` → 失败原因 + 真实重试倒计时（通用原因写`重试`，`凭据失效`/`限流` 原样保留）→ 过期`旧 12m` → 正常`↻ 04:32` → 算不出时刻退回数据年龄；折叠态只给 `失败`/`旧` 前缀 + 摘要（倒计时不挤占摘要）。**未取到数据不出行、失败不画 0%**；有缓存时失败仍展示缓存。**倒计时/年龄必须用 `updatedAt`、`nextRefreshAt` 与共享秒级时钟现算**（`rows()` 不读时钟，否则每秒重建全部行、重跑 renderer）。
 
 # 数据口径（别自己发明）
 
@@ -99,6 +100,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `docs/superpowers/specs/2026-11-11-multi-provider-quota-design.md` — 额度区块展示全部已登录订阅的设计（发现/排序/折叠/验收）。
 - `docs/superpowers/specs/2026-11-11-heavy-dashboard-design.md` — HUD 5.0 重型仪表盘：审计结论、Obsidian Amber 视觉系统、37 列几何、额度新鲜度与子代理结局口径、ViewModel 拆分。
 - `docs/superpowers/specs/2026-11-11-quota-reset-relative-design.md` — 额度 `↻` 重置提示改为相对剩余时长、数据年龄 `0m` 的口径与验收。
+- `docs/superpowers/specs/2026-11-15-quota-refresh-countdown.md` — 组头「下次刷新倒计时」与秒级 UI 心跳：状态优先级、`nextCheckAt` 排程约束、格式化边界与测试清单。
 - `docs/reference-usage-monitor-refresh-cadence.md` — 外部高星用量监控项目的刷新间隔/退避样本与「网络端点 vs 本地读取」分档，用于判断本插件 5min 间隔是否合理。
 - `docs/reference-desktop-gui-plugins.md` — OpenCode Desktop GUI 插件（`./gui-experimental`）开发手册：构建/加载规则、窗口与主进程上下文、注册表、Ipc/存储/生命周期、排障；**§15 是 2.2.0 实机验证结论**（目录型插件三入口、server 可 import 什么、共用 RPC 契约、槽位真实跨度）。
 - `docs/design-desktop-entry.md` — 双入口设计与桌面 Markdown 配色的历史记录（**已冻结**）、恢复方式与后续 HUD 面板路线。

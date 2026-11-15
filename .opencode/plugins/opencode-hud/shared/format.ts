@@ -157,6 +157,20 @@ export function fmtAge(ms: number | undefined): string {
   return `${Math.floor(hours / 24)}d`
 }
 
+// 倒计时（距绝对截止时刻的剩余毫秒）：<1h → MM:SS；≥1h → HH:MM:SS。
+// 向上取整：只有真正到点（剩余 ≤0）才显示 00:00，不会提前一整秒归零。
+// 两位定宽（分钟/秒始终补零），右对齐时数字变化不会抖动。
+export function fmtCountdown(ms: number | undefined): string | undefined {
+  if (ms === undefined || !Number.isFinite(ms)) return undefined
+  const total = Math.max(0, Math.ceil(ms / 1000))
+  const h = Math.floor(total / 3600)
+  const m = Math.floor((total % 3600) / 60)
+  const s = total % 60
+  const mm = String(m).padStart(2, "0")
+  const ss = String(s).padStart(2, "0")
+  return h > 0 ? `${String(h).padStart(2, "0")}:${mm}:${ss}` : `${mm}:${ss}`
+}
+
 // 子代理耗时（短格式）：42s / 1m10s / 1h02m
 export function fmtElapsed(ms: number | undefined): string {
   if (ms === undefined || !Number.isFinite(ms) || ms < 0) return ""

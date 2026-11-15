@@ -24,10 +24,14 @@ export type QuotaStatus = {
   hasData: boolean
   /** 是否有请求在途 */
   fetching: boolean
-  /** 距上次成功写入的毫秒数；从未成功 → undefined */
+  /** 距上次成功写入的毫秒数（快照；逐秒展示请用 updatedAt 现算，见 quotaStatusTrail） */
   ageMs?: number
-  /** 成功数据是否已超过新鲜窗口（刷新已失败或长时间未跑到） */
+  /** 成功数据是否已超过新鲜窗口（快照；同上，逐秒展示现算） */
   stale: boolean
+  /** 上次成功写入的绝对时刻：倒计时与数据年龄都从它和当前时间算，每秒更新不需要重建行 */
+  updatedAt?: number
+  /** 下一次允许发起请求的绝对时刻：undefined = 无法确定（未注册端点 / 没凭据 / 从未尝试 / 在途） */
+  nextRefreshAt?: number
   /** 最近一次请求失败的结构化原因（成功/未请求 → undefined） */
   error?: { code: string; status?: number; message: string }
 }

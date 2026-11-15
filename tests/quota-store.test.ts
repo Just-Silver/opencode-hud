@@ -408,3 +408,129 @@ test("status：读取状态本身不触发请求", async () => {
   for (let i = 0; i < 10; i++) store.status("opencode-go")
   assert.equal(deps.fetchCalls.length, 0)
 })
+// ─── 下一次允许请求时刻（倒计时与真实调度的唯一来源） ───
+test("nextCheckAt：未注册端点 / 从未尝试 → undefined（不排程、不显示假倒计时）", () => {
+  const deps = makeDeps({ apiUrlFor: (pid) => (pid === "opencode-go" ? "https://x/usage" : undefined) })
+  const store = new QuotaStore(deps)
+  assert.equal(store.nextCheckAt("opencode-go"), undefined)
+  assert.equal(store.nextCheckAt("open-design"), undefined)
+})
+
+test("nextCheckAt：成功后 = 上次尝试 + 5min；倒计时归零后 load 真发请求", async () => {
+  let now = 1_000_000
+  const deps = makeDeps({ now: () => now })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  const deadline = store.nextCheckAt("opencode-go")
+  assert.equal(deadline, now + QUOTA_REFRESH_MS)
+  assert.equal(store.status("opencode-go").nextRefreshAt, deadline)
+
+  now = deadline! // 模拟 UI 排程在截止时刻唤醒
+  assert.equal(await store.load("opencode-go"), true)
+  assert.equal(deps.fetchCalls.length, 2)
+  assert.equal(store.nextCheckAt("opencode-go"), now + QUOTA_REFRESH_MS)
+})
+
+test("nextCheckAt：失败按 5/10/15min 退避推进，到点即允许重试", async () => {
+  let now = 1_000_000
+  const deps = makeDeps({
+    now: () => now,
+    fetch: async (pid, apiUrl, key) => {
+      deps.fetchCalls.push({ pid, apiUrl, key })
+      throw new Error("boom")
+    },
+  })
+  const store = new QuotaStore(deps)
+
+  await store.load("opencode-go")
+  assert.equal(store.nextCheckAt("opencode-go"), now + 5 * 60_000)
+  now = store.nextCheckAt("opencode-go")!
+  await store.load("opencode-go")
+  assert.equal(store.nextCheckAt("opencode-go"), now + 10 * 60_000)
+  now = store.nextCheckAt("opencode-go")!
+  await store.load("opencode-go")
+  assert.equal(store.nextCheckAt("opencode-go"), now + 15 * 60_000) // 封顶
+  assert.equal(deps.fetchCalls.length, 3)
+})
+
+test("nextCheckAt：服务端 Retry-After 优先于本地退避", async () => {
+  let now = 1_000_000
+  let calls = 0
+  const retryAt = now + 2 * 60_000
+  const deps = makeDeps({
+    now: () => now,
+    fetch: async () => {
+      calls++
+      throw new QuotaRequestError("429", "rate_limited", { status: 429, retryAt })
+    },
+  })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  assert.equal(store.nextCheckAt("opencode-go"), retryAt) // 不是 now + 5min
+  now = retryAt
+  await store.load("opencode-go") // 到点先试一次，不叠加本地退避
+  assert.equal(calls, 2)
+})
+
+test("nextCheckAt：请求在途 → undefined（落定后重新排程，不重复请求）", async () => {
+  let now = 1_000_000
+  let release: (value: QuotaData | undefined) => void = () => {}
+  const deps = makeDeps({
+    now: () => now,
+    fetch: () => new Promise<QuotaData | undefined>((resolve) => { release = resolve }),
+  })
+  const store = new QuotaStore(deps)
+  const loading = store.load("opencode-go")
+  await flush()
+  assert.equal(store.nextCheckAt("opencode-go"), undefined)
+  assert.equal(store.status("opencode-go").nextRefreshAt, undefined)
+
+  release(okData)
+  assert.equal(await loading, true)
+  assert.equal(store.nextCheckAt("opencode-go"), now + QUOTA_REFRESH_MS)
+})
+
+test("nextCheckAt：没凭据 → undefined（交给凭据探测发现登录，不空转）", async () => {
+  const deps = makeDeps({ resolveKey: async () => undefined })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  assert.equal(store.nextCheckAt("opencode-go"), undefined)
+})
+
+test("nextCheckAt：切号后不继承旧账号的退避截止时刻", async () => {
+  let now = 1_000_000
+  let key = "key-one"
+  let failing = true
+  const deps = makeDeps({
+    now: () => now,
+    resolveKey: async () => key,
+    fetch: async () => {
+      if (failing) throw new Error("boom")
+      return okData
+    },
+  })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+  now = store.nextCheckAt("opencode-go")!
+  await store.load("opencode-go") // 第二次失败 → 10min 退避
+  assert.equal(store.nextCheckAt("opencode-go"), now + 10 * 60_000)
+
+  key = "key-two"
+  failing = false
+  assert.equal(await store.load("opencode-go"), true) // 新凭据不受旧退避限制
+  assert.equal(store.nextCheckAt("opencode-go"), now + QUOTA_REFRESH_MS)
+})
+
+test("nextCheckAt：系统休眠恢复后只补一次请求，随即重新对齐", async () => {
+  let now = 1_000_000
+  const deps = makeDeps({ now: () => now })
+  const store = new QuotaStore(deps)
+  await store.load("opencode-go")
+
+  now += 30 * 60_000 // 挂起半小时：截止时刻早已过去
+  assert.ok(store.nextCheckAt("opencode-go")! < now)
+  assert.equal(await store.load("opencode-go"), true)
+  assert.equal(deps.fetchCalls.length, 2) // 不补发多次
+  assert.equal(store.nextCheckAt("opencode-go"), now + QUOTA_REFRESH_MS)
+})
+
