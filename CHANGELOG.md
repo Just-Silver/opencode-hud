@@ -3,6 +3,21 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [5.2.0] - 2026-11-15
+
+
+### 修复
+
+- **hud** 额度请求开始时立即通知，让「更新中」能被看到
+
+### 新功能
+
+- **hud** 额度组头改为下次刷新倒计时，并加秒级 UI 心跳
+
+### 杂项
+
+- 更新 CHANGELOG 到 v5.1.0
+- 版本号更新到 v5.2.0
 ## [5.1.0] - 2026-11-12
 
 
