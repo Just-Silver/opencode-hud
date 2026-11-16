@@ -3,7 +3,28 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [5.2.0] - 2026-11-15
+## [5.3.0](https://github.com/Just-Silver/opencode-hud/compare/v5.2.0...v5.3.0) - 2026-11-16
+
+
+### 修复
+
+- **hud** ViewModel 入参改 getter，修复 props 快照导致的会话不刷新
+- Windows 下 tar 改用相对路径并修正 CI 编码与清理
+
+### 文档
+
+- 同步 HUD 约束（胶囊配色、getter 入参、计数定宽）
+
+### 新功能
+
+- **hud** Token 缩写增加 B 档（十亿），并处理 999.9M 进位降格
+- 落实全项目审计决策并发布 5.3.0
+
+### 样式
+
+- **hud** 子代理卡片头计数去掉文字标签，只留状态灯与数字
+- **hud** 子代理计数改为状态胶囊（灯 + 状态暗底 + 3 位定宽数字）
+## [5.2.0](https://github.com/Just-Silver/opencode-hud/compare/v5.1.0...v5.2.0) - 2026-11-15
 
 
 ### 修复
@@ -16,9 +37,8 @@
 
 ### 杂项
 
-- 更新 CHANGELOG 到 v5.1.0
 - 版本号更新到 v5.2.0
-## [5.1.0] - 2026-11-12
+## [5.1.0](https://github.com/Just-Silver/opencode-hud/compare/v5.0.0...v5.1.0) - 2026-11-12
 
 
 ### 修复
@@ -38,10 +58,6 @@
 - 数据年龄以 0m 起步，登记额度重置口径文档
 - **hud** 子代理 Task Inspector 双列展开详情（v5.1.0）
 
-### 杂项
-
-- 更新 CHANGELOG 到 v5.0.0
-
 ### 样式
 
 - **hud** 取消卡片之间的空行间隔，卡片直接相邻
@@ -50,7 +66,7 @@
 - **hud** 额度已用占比的低档配色改为绿色
 - **hud** 子代理运行中绿色、已停止黄色，竖线与计数同色
 - **hud** Tok/s 与首字同色，收起不再触发文本选区
-## [5.0.0] - 2026-11-11
+## [5.0.0](https://github.com/Just-Silver/opencode-hud/compare/v4.4.0...v5.0.0) - 2026-11-11
 
 
 ### 修复
@@ -70,11 +86,7 @@
 - **quota** 多订阅排序、折叠摘要与展开判定纯函数
 - **hud** 额度区块展示全部已登录订阅并支持逐组展开
 - **hud** 侧栏重做为 OpenCode Native Pro 重型仪表盘
-
-### 杂项
-
-- 更新 CHANGELOG 到 v4.4.0
-## [4.4.0] - 2026-11-10
+## [4.4.0](https://github.com/Just-Silver/opencode-hud/compare/v4.3.1...v4.4.0) - 2026-11-10
 
 
 ### 文档
@@ -89,10 +101,9 @@
 
 ### 杂项
 
-- 更新 CHANGELOG 到 v4.3.1
 - 冻结并移除桌面版 GUI 入口
 - 发布 4.4.0
-## [4.3.1] - 2026-11-04
+## [4.3.1](https://github.com/Just-Silver/opencode-hud/compare/v4.3.0...v4.3.1) - 2026-11-04
 
 
 ### 修复
@@ -105,9 +116,8 @@
 
 ### 杂项
 
-- 更新 CHANGELOG 到 v4.3.0
 - 发布 v4.3.1
-## [4.3.0] - 2026-11-01
+## [4.3.0](https://github.com/Just-Silver/opencode-hud/compare/v4.2.0...v4.3.0) - 2026-11-01
 
 
 ### 修复
@@ -133,13 +143,12 @@
 
 ### 杂项
 
-- 更新 CHANGELOG 到 v4.2.0
 - 发布 v4.3.0
 
 ### 重构
 
 - 抽取首字与速度的共用格式化
-## [4.2.0] - 2026-10-27
+## [4.2.0](https://github.com/Just-Silver/opencode-hud/compare/v4.1.0...v4.2.0) - 2026-10-27
 
 
 ### 文档
@@ -150,13 +159,12 @@
 
 ### 杂项
 
-- 更新 CHANGELOG 到 v4.1.0
 - 发布 v4.2.0（更名 opencode-hud + 安装脚本修正）
 
 ### 重构
 
 - 插件更名为 opencode-hud
-## [4.1.0] - 2026-10-26
+## [4.1.0](https://github.com/Just-Silver/opencode-hud/compare/v4.0.1...v4.1.0) - 2026-10-26
 
 
 ### 其他
@@ -170,11 +178,7 @@
 ### 新功能
 
 - 子代理区块默认只常驻最近 5 条已完成（v4.1.0）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v4.0.1
-## [4.0.1] - 2026-10-22
+## [4.0.1](https://github.com/Just-Silver/opencode-hud/compare/v4.0.0...v4.0.1) - 2026-10-22
 
 
 ### 文档
@@ -187,9 +191,8 @@
 
 ### 杂项
 
-- 更新 CHANGELOG 到 v4.0.0
 - 发布 v4.0.1
-## [4.0.0] - 2026-10-21
+## [4.0.0](https://github.com/Just-Silver/opencode-hud/compare/v3.2.0...v4.0.0) - 2026-10-21
 
 
 ### 文档
@@ -199,42 +202,25 @@
 ### 新功能
 
 - 移除实时 token 功能，改为每步结束刷新（v4.0.0）（破坏性变更）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v3.2.0
-## [3.2.0] - 2026-10-21
+## [3.2.0](https://github.com/Just-Silver/opencode-hud/compare/v3.1.2...v3.2.0) - 2026-10-21
 
 
 ### 新功能
 
 - 实时速度改用事件驱动卡尔曼，token 估算改为可学习校准（v3.2.0）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v3.1.2
-- 更新 CHANGELOG 与文档到 v3.2.0
-## [3.1.2] - 2026-10-20
+## [3.1.2](https://github.com/Just-Silver/opencode-hud/compare/v3.1.1...v3.1.2) - 2026-10-20
 
 
 ### 修复
 
 - 实时速度改用活动时长并修复工具前后掉值（v3.1.2）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v3.1.1
-## [3.1.1] - 2026-10-20
+## [3.1.1](https://github.com/Just-Silver/opencode-hud/compare/v3.1.0...v3.1.1) - 2026-10-20
 
 
 ### 修复
 
 - 侧边栏用量改取宿主会话聚合列（v3.1.1）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v3.1.0
-## [3.1.0] - 2026-10-19
+## [3.1.0](https://github.com/Just-Silver/opencode-hud/compare/v3.0.0...v3.1.0) - 2026-10-19
 
 
 ### 其他
@@ -248,21 +234,13 @@
 ### 新功能
 
 - 新增子代理区块与性能块（v3.1.0）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v3.0.0
-## [3.0.0] - 2026-10-12
+## [3.0.0](https://github.com/Just-Silver/opencode-hud/compare/v2.4.0...v3.0.0) - 2026-10-12
 
 
 ### 新功能
 
 - 额度展示改为数据驱动 + 共享渲染器层（供应商自选渲染形态）（破坏性变更）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v2.4.0
-## [2.4.0] - 2026-10-12
+## [2.4.0](https://github.com/Just-Silver/opencode-hud/compare/v2.3.1...v2.4.0) - 2026-10-12
 
 
 ### 修复
@@ -273,14 +251,10 @@
 
 - 额度行显示窗口重置时间（resetsAt）+ 进度条与对齐修复
 
-### 杂项
-
-- 更新 CHANGELOG 到 v2.3.1
-
 ### 重构
 
 - 额度端点常量归位供应商文件，移除 registry 冗余与兜底
-## [2.3.1] - 2026-10-09
+## [2.3.1](https://github.com/Just-Silver/opencode-hud/compare/v2.3.0...v2.3.1) - 2026-10-09
 
 
 ### 修复
@@ -290,21 +264,13 @@
 ### 文档
 
 - 记录 OpenDesign 额度 API 探测结论（API Key 无额度端点）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v2.3.0
-## [2.3.0] - 2026-10-06
+## [2.3.0](https://github.com/Just-Silver/opencode-hud/compare/v2.2.0...v2.3.0) - 2026-10-06
 
 
 ### 新功能
 
 - 侧边栏视觉改版（带边框面板 + opencode 主题配色 + 数值右对齐）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v2.2.0
-## [2.2.0] - 2026-09-26
+## [2.2.0](https://github.com/Just-Silver/opencode-hud/compare/v2.1.0...v2.2.0) - 2026-09-26
 
 
 ### 修复
@@ -315,11 +281,7 @@
 ### 新功能
 
 - 更新横幅支持一键更新（弹窗 + 执行官方安装脚本）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v2.1.0
-## [2.1.0] - 2026-09-26
+## [2.1.0](https://github.com/Just-Silver/opencode-hud/compare/v2.0.1...v2.1.0) - 2026-09-26
 
 
 ### 回滚
@@ -335,22 +297,14 @@
 ### 新功能
 
 - 恢复启动时更新检查（磁盘缓存节流）并将插件数据移至自身目录
-
-### 杂项
-
-- 更新 CHANGELOG 到 v2.0.1
-## [2.0.1] - 2026-09-23
+## [2.0.1](https://github.com/Just-Silver/opencode-hud/compare/v2.0.0...v2.0.1) - 2026-09-23
 
 
 ### 文档
 
 - README 只保留用户向内容（维护者发版说明留在 AGENTS）并将版本升至 2.0.1
 - README 只保留用户向内容；版本升至 2.0.1（破坏性变更）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v2.0.0
-## [2.0.0] - 2026-09-23
+## [2.0.0](https://github.com/Just-Silver/opencode-hud/compare/v1.0.1...v2.0.0) - 2026-09-23
 
 
 ### CI
@@ -376,15 +330,11 @@
 - 增加 no-op ./server 入口（配置安装可达性的必要条件）并同步守护测试
 - 分发改为配置安装（移除脚本安装与运行时更新检查）（破坏性变更）
 
-### 杂项
-
-- 更新 CHANGELOG 到 v1.0.1
-
 ### 重构
 
 - 移除 install/uninstall 脚本（分发统一为配置安装）
 - 移除侧边栏更新横幅与更新检查模块（更新交由 opencode plugin update）
-## [1.0.1] - 2026-09-10
+## [1.0.1](https://github.com/Just-Silver/opencode-hud/compare/v1.0.0...v1.0.1) - 2026-09-10
 
 
 ### CI
@@ -394,12 +344,7 @@
 ### 修复
 
 - 适配 opencode2 beta-19425 插件加载（改包名 + 目录型 tui 入口）
-
-### 杂项
-
-- 更新 CHANGELOG 到 v1.0.0
-- 更新 CHANGELOG 到 v1.0.1
-## [1.0.0] - 2026-09-01
+## [1.0.0](https://github.com/Just-Silver/opencode-hud/releases/tag/v1.0.0) - 2026-09-01
 
 
 ### CI
@@ -505,7 +450,6 @@
 ### 杂项
 
 - 更新 LICENSE 版权信息
-- 更新 CHANGELOG 到 v1.0.0
 
 ### 样式
 
