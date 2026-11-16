@@ -36,7 +36,7 @@ export function createRegistry(providers: ProviderRegistration[]) {
   // 显示名：命中用注册名，未命中 undefined（UI 回退 id）
   const getProviderName = (pid: string): string | undefined => match(pid)?.name ?? match(pid)?.id
 
-  // API URL 查找：未命中返回 undefined（调用方 QuotaStore 记 warn 并跳过，不做兜底指向）
+  // API URL 查找：未命中返回 undefined（无兜底指向；未注册端点由调用方静默跳过）
   const getProviderApiUrl = (pid: string): string | undefined => match(pid)?.apiUrl
 
   // 共享渲染器名：未命中/未声明返回 undefined（UI 侧回落默认渲染器）

@@ -77,11 +77,6 @@ export function padEndVisual(s: string, width: number): string {
   return pad > 0 ? s + " ".repeat(pad) : s
 }
 
-// 满宽分隔线：1 行 "─" 铺满 width 个终端列。用于区块标题下方的独立分隔线。
-export function dividerLine(width: number): string {
-  return "─".repeat(Math.max(1, Math.floor(width)))
-}
-
 // 额度百分比：原样透传（供应商决定精度）
 // percent 契约：0-100 的有限数字（整数或任意小数）。整数显示 42%、小数原样显示 0.36%。
 // UI 层零加工 → 新增供应商只需返回真实数值，显示层永远不用改。
@@ -95,6 +90,18 @@ export function fmtPctInt(v: number | undefined): string {
 export function quotaPct(item: QuotaItem | undefined): number | undefined {
   const p = item?.percent
   return typeof p === "number" && Number.isFinite(p) ? p : undefined
+}
+
+// 百分比列宽：由同组实际格式化文本的最宽者决定（供应商决定精度，可能出现小数）。
+// 固定 4 列预算会让 `42%` 与 `0.36%` 混排时右缘差 1 列，flex 进度条长度随之不可比。
+export function pctColumnWidth(items: readonly QuotaItem[]): number {
+  let width = 0
+  for (const item of items) {
+    const p = quotaPct(item)
+    if (p === undefined) continue
+    width = Math.max(width, visualWidth(fmtPctInt(p)))
+  }
+  return width
 }
 
 // ── 额度窗口重置时间（ISO 字符串）→ 相对剩余时长 ──

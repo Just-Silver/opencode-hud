@@ -15,7 +15,7 @@ type UsageWindow = { status?: string; percent?: number; resetsAt?: string }
 type UsageResp = { usage?: { rolling?: UsageWindow; weekly?: UsageWindow; monthly?: UsageWindow } }
 
 // 纯转换（离线可测）：API 三窗口 → 条目列表。
-// 标签与顺序在此定义；重置时间（resetsAt）经 fmtResetHint 转成 "↻ 周一" 放进 hint（契约无语义字段）。
+// 标签与顺序在此定义；重置时间经 fmtResetHint 转成相对剩余时长塞进 hint（契约只放渲染原语）。
 export function mapOpencodeGo(resp: UsageResp | undefined): QuotaData | undefined {
   const items: QuotaItem[] = []
   const add = (label: string, w: UsageWindow | undefined) => {

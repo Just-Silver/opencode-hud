@@ -1,5 +1,4 @@
 // ─── 模型层：额度查询状态机（凭据分桶 + 刷新/退避 + 并发去重 + 写库订阅通知，依赖注入可单测） ───
-import { createHash } from "node:crypto"
 import { QuotaRequestError, redactSecrets, type QuotaErrorCode } from "../shared/http.ts"
 import { normID } from "../shared/id.ts"
 import { fmtAge, fmtCountdown } from "../shared/format.ts"
@@ -24,18 +23,28 @@ export type QuotaErrorState = {
   message: string
 }
 
+export type QuotaKey = { key: string; identity: string }
+// 三分支：对象 = 可用凭据；null = 有意跳过（宿主状态不明/非公共 Console）；undefined = 没有任何来源
+export type QuotaKeyResolution = QuotaKey | null | undefined
+
 // 查询服务依赖（生产由入口注入真实实现，测试注入 mock）
 export interface QuotaDeps {
   apiUrlFor(pid: string): string | undefined
-  resolveKey(pid: string): Promise<string | undefined>
+  resolveKey(pid: string): Promise<QuotaKeyResolution>
   fetch(pid: string, apiUrl: string, key: string): Promise<QuotaData | undefined>
   log(level: "warn" | "error", message: string): void
   /** 可注入时钟，供退避/间隔测试；生产用 Date.now。 */
   now?(): number
 }
 
+type InFlight = {
+  /** 发请求时的凭据身份：等待者据此判断「等的是不是当前账号」。 */
+  fingerprint: string
+  promise: Promise<boolean>
+}
+
 type Entry = {
-  /** 凭据指纹：key 变了就是另一个账号，旧行不能继续展示。 */
+  /** 凭据身份：换号（identity 变）就是另一个账号，旧行不能继续展示。 */
   fingerprint: string
   data?: QuotaData
   /** 上次尝试结束的时刻；没有表示这个凭据还没请求过。 */
@@ -45,10 +54,6 @@ type Entry = {
   failures: number
   retryAt?: number
   error?: QuotaErrorState
-}
-
-function fingerprintOf(key: string): string {
-  return createHash("sha256").update(key).digest("hex").slice(0, 16)
 }
 
 function backoffMs(failures: number): number {
@@ -74,7 +79,7 @@ function errorStateOf(error: unknown, key: string): QuotaErrorState {
 
 export class QuotaStore {
   private entries = new Map<string, Entry>()
-  private inFlight = new Map<string, Promise<boolean>>()
+  private inFlight = new Map<string, InFlight>()
   private listeners = new Set<() => void>()
   private deps: QuotaDeps
 
@@ -152,7 +157,7 @@ export class QuotaStore {
     }
   }
 
-  // 取（或切换）当前凭据对应的桶。指纹变了 = 换了账号：旧数据立刻作废并清空退避，
+  // 取（或切换）当前凭据对应的桶。身份变了 = 换了账号：旧数据立刻作废并清空退避，
   // 不能等新请求成功才替换，否则切号后最多还有一个刷新周期的旧账号数据。
   private adopt(pid: string, fingerprint: string): Entry {
     const existing = this.entries.get(pid)
@@ -172,88 +177,109 @@ export class QuotaStore {
     const apiUrl = this.deps.apiUrlFor(pid)
     if (!apiUrl) return false
 
-    // 先解析凭据再判断间隔：否则旧凭据的退避会挡住新凭据的第一次尝试。
-    let key: string | undefined
-    try {
-      key = await this.deps.resolveKey(pid)
-    } catch {
-      key = undefined
-    }
-    const fingerprint = key ? fingerprintOf(key) : ""
-    const entry = this.adopt(pid, fingerprint)
-    if (!key) {
-      // 没凭据是常态（没登录 / 未连接）：同一凭据状态下只记一次，心跳不刷屏；
-      // 登录或切号会换桶（fingerprint 变化），之后再丢凭据会重新记一条。
-      const first = entry.at === undefined
-      entry.at = this.now()
-      if (first) this.deps.log("warn", `quota ${pid} missing key`)
-      return false
-    }
-
-    const now = this.now()
-    // 服务端给了 Retry-After 就以它为准：到点就试一次，不再叠加本地退避。
-    let retryDue = false
-    if (entry.retryAt !== undefined) {
-      if (now < entry.retryAt) return false
-      entry.retryAt = undefined
-      retryDue = true
-    }
-    const waitMs = entry.failures > 0 ? backoffMs(entry.failures) : QUOTA_REFRESH_MS
-    const forced = opts?.force === true && entry.failures === 0
-    if (!retryDue && entry.at !== undefined && now - entry.at < waitMs && !forced) {
-      return false
-    }
-
-    if (this.inFlight.has(pid)) {
-      await this.inFlight.get(pid)
-      return this.entries.get(pid)?.data !== undefined // 并发等待完成后：缓存可能已被写入
-    }
-
-    const p = (async (): Promise<boolean> => {
+    // 在途请求可能属于刚被切掉的旧凭据：等它落定后为新凭据接续一次请求，否则新账号要等
+    // 60s 心跳才出现，且这段时间没有可排程的截止时刻。只接续一轮：等待期间再次切号/登出时，
+    // 第二轮会重新解析凭据（不会把旧 key 复活成当前账号），也不会形成递归/重试风暴。
+    for (let attempt = 0; attempt < 2; attempt++) {
+      // 先解析凭据再判断间隔：否则旧凭据的退避会挡住新凭据的第一次尝试。
+      let resolution: QuotaKeyResolution
       try {
-        const usage = await this.deps.fetch(pid, apiUrl, key)
-        const current = this.entries.get(pid)
-        // 请求期间切了凭据：这是旧账号的结果，丢弃，不覆盖新桶。
-        if (!current || current.fingerprint !== fingerprint) return false
-        if (usage) {
-          const at = this.now()
-          this.entries.set(pid, { fingerprint, data: usage, at, updatedAt: at, failures: 0 })
-          return true
-        }
-        current.at = this.now()
-        current.failures = 0
-        current.error = undefined
-        this.deps.log("warn", `quota ${pid} empty response`)
-        return false
-      } catch (caught) {
-        const current = this.entries.get(pid)
-        if (!current || current.fingerprint !== fingerprint) return false
-        const error = errorStateOf(caught, key)
-        this.entries.set(pid, {
-          fingerprint,
-          ...(current.data === undefined ? {} : { data: current.data }),
-          ...(current.updatedAt === undefined ? {} : { updatedAt: current.updatedAt }),
-          at: this.now(),
-          failures: current.failures + 1,
-          ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
-          error,
-        })
-        this.deps.log("error", `quota ${pid} fetch failed: ${error.message}`)
+        resolution = await this.deps.resolveKey(pid)
+      } catch {
+        resolution = undefined
+      }
+      // 有意跳过（宿主状态不明 / 非公共 Console）：换到空桶立即丢掉旧账号数据，
+      // 但不 warn（不是「没登录」）、不请求、不写数据；空桶也排不出下一次检查时刻。
+      if (resolution === null) {
+        this.adopt(pid, "")
         return false
       }
-    })().finally(() => {
-      // 先清在途标记再通知：展示层的 fetching 直接读 inFlight，
-      // 在清掉之前通知会把界面钉在「有数据 + 仍在途」的快照上（「更新中」要等下一次心跳才撤）。
-      // 与下面的开始通知成对出现：开始（fetching=true）→ 落定（fetching=false + 新截止时刻）。
-      this.inFlight.delete(pid)
+      const fingerprint = resolution ? resolution.identity : ""
+      const entry = this.adopt(pid, fingerprint)
+      if (!resolution) {
+        // 没凭据是常态（没登录 / 未连接）：同一凭据状态下只记一次，心跳不刷屏；
+        // 登录或切号会换桶（fingerprint 变化），之后再丢凭据会重新记一条。
+        const first = entry.at === undefined
+        entry.at = this.now()
+        if (first) this.deps.log("warn", `quota ${pid} missing key`)
+        return false
+      }
+      const key = resolution.key
+
+      const now = this.now()
+      // 服务端给了 Retry-After 就以它为准：到点就试一次，不再叠加本地退避。
+      let retryDue = false
+      if (entry.retryAt !== undefined) {
+        if (now < entry.retryAt) return false
+        entry.retryAt = undefined
+        retryDue = true
+      }
+      const waitMs = entry.failures > 0 ? backoffMs(entry.failures) : QUOTA_REFRESH_MS
+      const forced = opts?.force === true && entry.failures === 0
+      if (!retryDue && entry.at !== undefined && now - entry.at < waitMs && !forced) {
+        return false
+      }
+
+      const flight = this.inFlight.get(pid)
+      if (flight) {
+        await flight.promise
+        // 同身份：本次等待就是并发去重，直接回报刚写入的缓存；失败/空响应也在这里结束，
+        // 重新走一遍间隔/退避判断只会被同样挡下，不在这里重发。
+        if (flight.fingerprint === fingerprint) return this.entries.get(pid)?.data !== undefined
+        // 旧身份的结果已按 identity 丢弃：回到循环顶部重新解析当前凭据，并为它接续请求。
+        continue
+      }
+
+      const promise = (async (): Promise<boolean> => {
+        try {
+          const usage = await this.deps.fetch(pid, apiUrl, key)
+          const current = this.entries.get(pid)
+          // 请求期间切了凭据：这是旧账号的结果，丢弃，不覆盖新桶。
+          if (!current || current.fingerprint !== fingerprint) return false
+          if (usage) {
+            const at = this.now()
+            this.entries.set(pid, { fingerprint, data: usage, at, updatedAt: at, failures: 0 })
+            return true
+          }
+          current.at = this.now()
+          current.failures = 0
+          current.error = undefined
+          this.deps.log("warn", `quota ${pid} empty response`)
+          return false
+        } catch (caught) {
+          const current = this.entries.get(pid)
+          if (!current || current.fingerprint !== fingerprint) return false
+          const error = errorStateOf(caught, key)
+          this.entries.set(pid, {
+            fingerprint,
+            ...(current.data === undefined ? {} : { data: current.data }),
+            ...(current.updatedAt === undefined ? {} : { updatedAt: current.updatedAt }),
+            at: this.now(),
+            failures: current.failures + 1,
+            ...(error.retryAt === undefined ? {} : { retryAt: error.retryAt }),
+            error,
+          })
+          this.deps.log("error", `quota ${pid} fetch failed: ${error.message}`)
+          return false
+        }
+      })().finally(() => {
+        // 先清在途标记再通知：展示层的 fetching 直接读 inFlight，
+        // 在清掉之前通知会把界面钉在「有数据 + 仍在途」的快照上（「更新中」要等下一次心跳才撤）。
+        // 与下面的开始通知成对出现：开始（fetching=true）→ 落定（fetching=false + 新截止时刻）。
+        // 只清自己这条记录：接续请求可能已把它替换成新凭据的记录。
+        if (this.inFlight.get(pid)?.promise === promise) this.inFlight.delete(pid)
+        this.bump()
+      })
+      this.inFlight.set(pid, { fingerprint, promise })
+      // 请求真正开始时立刻通知一次：展示层的 fetching 直接读 inFlight，只在落定时通知的话
+      // 「更新中」永远看不到（倒计时归零后界面会停在 00:00 直到请求结束）。
+      // 放到 inFlight 写入之后，订阅者读到的状态才是「在途」；并发等待者不会走到这里，不会重复通知。
       this.bump()
-    })
-    this.inFlight.set(pid, p)
-    // 请求真正开始时立刻通知一次：展示层的 fetching 直接读 inFlight，只在落定时通知的话
-    // 「更新中」永远看不到（倒计时归零后界面会停在 00:00 直到请求结束）。
-    // 放到 inFlight 写入之后，订阅者读到的状态才是「在途」；并发等待者不会走到这里，不会重复通知。
-    this.bump()
-    return p
+      return promise
+    }
+
+    // 第二轮仍在等另一凭据的在途请求：本轮不再接续，交给下一次排程/心跳。
+    return this.entries.get(pid)?.data !== undefined
   }
 }
 

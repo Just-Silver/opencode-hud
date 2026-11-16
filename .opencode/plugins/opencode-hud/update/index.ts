@@ -14,10 +14,10 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs"
 import { dirname, join } from "path"
 import { pluginDataDir } from "../shared/paths.ts"
+import { parseFormalTag, parseTrustedReleaseLocation, RELEASES_LATEST_URL } from "./release.ts"
 import { compareVersions, VERSION } from "./version.ts"
 
-export const REPO = "Just-Silver/opencode-hud"
-export const RELEASES_LATEST_URL = `https://github.com/${REPO}/releases/latest`
+export { REPO, RELEASES_LATEST_URL } from "./release.ts"
 
 // ── 节流参数 ──
 // 成功 TTL 取 24h：Release 不常发，一天查一次足够；
@@ -93,40 +93,26 @@ export function resolveUpdate(
   body?: string,
 ): UpdateInfo | undefined {
   if (!remote) return undefined // 无 Release → 不提示
+  if (!parseFormalTag(remote)) return undefined // 非正式 tag（预发布/裸版本/垃圾）→ 不提示
   const cmp = compareVersions(local, remote)
   if (cmp === undefined || cmp >= 0) return undefined // 非法/本地不落后（含开发版超前）→ 不提示
-  return { latestVersion: parseVersionTag(remote), name: name ?? `v${parseVersionTag(remote)}`, body }
+  const version = remote.slice(1)
+  return { latestVersion: version, name: name ?? `v${version}`, body }
 }
 
-// tag_name "v1.2.0" → "1.2.0"；非法原样返回（交给调用方）
-function parseVersionTag(tag: string): string {
-  return tag.replace(/^v/, "")
-}
-
-// 从跳转目标 URL 提取 tag：.../releases/tag/v1.2.3 → "v1.2.3"
-export function parseTagFromReleaseUrl(url: string | null | undefined): string | undefined {
-  const m = /\/releases\/tag\/([^/?#]+)/.exec(url ?? "")
-  if (!m?.[1]) return undefined
-  try {
-    return decodeURIComponent(m[1])
-  } catch {
-    return m[1]
-  }
-}
-
-// 拉取远程最新 Release 的 tag；超时 / 任何失败 → undefined（静默）
+// 拉取远程最新 Release 的 tag；超时 / 任何失败 / 非受信跳转 → undefined（静默）
 export async function fetchLatestTag(
   fetchImpl: typeof fetch = fetch,
   timeoutMs: number = UPDATE_CHECK_TIMEOUT_MS,
 ): Promise<string | undefined> {
   try {
     const res = await fetchImpl(RELEASES_LATEST_URL, {
-      redirect: "manual", // 只读 302 的 Location，不下载 Release 页面
+      redirect: "manual", // 只读 3xx 的 Location，不下载 Release 页面
       headers: { "User-Agent": "opencode-hud" },
       signal: AbortSignal.timeout(timeoutMs), // 网络挂起时 8s 后中止（按失败处理）
     })
-    // manual：Location 头；个别实现落到 res.url
-    return parseTagFromReleaseUrl(res.headers.get("location") ?? res.url)
+    if (res.status < 300 || res.status >= 400) return undefined
+    return parseTrustedReleaseLocation(res.headers.get("location"))
   } catch {
     return undefined // 超时 / 网络异常 → 静默
   }
@@ -153,11 +139,11 @@ export async function checkForUpdate(deps: UpdateCheckDeps = {}): Promise<Update
   if (isCacheFresh(cache, now)) return resolveUpdate(VERSION, cache?.latest) // 新鲜 → 零网络
 
   const tag = await fetchTag()
-  if (tag) {
+  if (tag && parseFormalTag(tag)) {
     writeCache(cachePath, { lastAttemptAt: now, lastSuccessAt: now, latest: tag })
     return resolveUpdate(VERSION, tag)
   }
-  // 失败：保留上次成功值，仅更新 lastAttemptAt（开启冷却窗口）
+  // 失败或非正式 tag：保留上次成功值，仅更新 lastAttemptAt（开启冷却窗口）
   writeCache(cachePath, { lastAttemptAt: now, lastSuccessAt: cache?.lastSuccessAt, latest: cache?.latest })
   return resolveUpdate(VERSION, cache?.latest)
 }

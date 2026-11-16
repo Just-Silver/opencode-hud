@@ -21,6 +21,7 @@ export function UpdateDialog(props: { version: string; onUpdated?: () => void })
   const ctx = usePlugin()
   const [phase, setPhase] = createSignal<Phase>("available")
   const [error, setError] = createSignal("")
+  const [running, setRunning] = createSignal(false)
 
   // 居中展示（show→replace 会把 centered 重置为 false，故在内容渲染时再设置）
   ctx.ui.dialog.set({ centered: true })
@@ -31,17 +32,27 @@ export function UpdateDialog(props: { version: string; onUpdated?: () => void })
   // 与官方一致：不是自动重启进程，而是帮你退出应用，用户重新启动即可（会话在 server 侧自动恢复）
   const restart = () => ctx.keymap.dispatch("app.exit")
 
-  // 执行更新：成功后清缓存（横幅不再出现）并回调 onUpdated
+  // 执行更新：成功后清缓存（横幅不再出现）并回调 onUpdated。
+  // applyUpdate 承诺不抛异常，这里仍兜底：否则弹窗会永久停在「正在更新」且无按钮。
   const run = async () => {
+    if (running()) return
+    setRunning(true)
     setPhase("updating")
-    const result = await applyUpdate({ version: props.version })
-    if (result.ok) {
-      markUpdated()
-      setPhase("done")
-      props.onUpdated?.()
-    } else {
-      setError(result.message)
+    try {
+      const result = await applyUpdate({ version: props.version })
+      if (result.ok) {
+        markUpdated()
+        setPhase("done")
+        props.onUpdated?.()
+      } else {
+        setError(result.message)
+        setPhase("failed")
+      }
+    } catch (error) {
+      setError(error instanceof Error ? error.message : String(error))
       setPhase("failed")
+    } finally {
+      setRunning(false)
     }
   }
 

@@ -6,7 +6,7 @@
 
 # 双入口设计：TUI + 桌面版
 
-> 依据：本地源码 `E:\Code\Projects\Agent\Externals\opencode`（2.2.6），以及本仓库 `docs/reference-desktop-gui-plugins.md` 中 2.2.0 的实机结论。GUI 插件 API 仍是实验性（`gui-experimental`），升级 OpenCode 后要重新冒烟。
+> 依据：本地宿主源码（当时在 `E:\Code\Projects\Agent\Externals\opencode`，2.2.6；当前路径与版本见 `AGENTS.md`），以及本仓库 `docs/reference-desktop-gui-plugins.md` 中 2.2.0 的实机结论。GUI 插件 API 仍是实验性（`gui-experimental`），升级 OpenCode 后要重新冒烟。
 
 ## 1. 背景与硬约束（冻结前）
 

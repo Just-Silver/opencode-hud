@@ -1,7 +1,7 @@
 // ─── shared/ 共享帮助函数单元测试 ───
 import { test } from "node:test"
 import assert from "node:assert/strict"
-import { dividerLine, fmtCountdown, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, fmtAge, quotaPct, quotaSummaryText, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
+import { fmtCountdown, fmtPct, fmtPctInt, fmtPerf, fmtResetHint, fmtResetTime, fmtTokens, fmtTpsText, padEndVisual, padStartVisual, fmtAge, pctColumnWidth, quotaPct, quotaSummaryText, sharePct, trimZero, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
 import { normID } from "../.opencode/plugins/opencode-hud/shared/id.ts"
 import { parseJson } from "../.opencode/plugins/opencode-hud/shared/jsonc.ts"
 
@@ -106,12 +106,32 @@ test("padEndVisual：按显示列右补空格（图标/前缀对齐列）", () =
   assert.equal(padEndVisual("abcdefghi", 8), "abcdefghi") // 超宽不截断
 })
 
-// ─── dividerLine：分隔线宽度 ───
-test("dividerLine：按宽度重复，最少 1 个字符", () => {
-  assert.equal(dividerLine(30), "─".repeat(30))
-  assert.equal(dividerLine(30).length, 30)
-  assert.equal(dividerLine(0).length, 1) // 宽度未测量（首帧 0）→ 至少 1 个
-  assert.equal(dividerLine(-5).length, 1)
+// ─── pctColumnWidth：百分比列宽按同组实际格式化结果 ───
+test("pctColumnWidth：整数/小数混排按最宽文本定列，右缘对齐且不丢精度", () => {
+  const items = [
+    { label: "5h", percent: 42 },
+    { label: "周", percent: 0.36 },
+    { label: "余额", text: "$3" },
+  ]
+  const width = pctColumnWidth(items)
+  assert.equal(width, 5) // "0.36%" 有 5 列，不得按 4 列预算截断
+  const cells = items
+    .filter((item) => quotaPct(item) !== undefined)
+    .map((item) => padStartVisual(fmtPctInt(quotaPct(item)), width))
+  assert.deepEqual(cells.map(visualWidth), [5, 5])
+  assert.deepEqual(cells, ["  42%", "0.36%"])
+})
+
+test("pctColumnWidth：无小数组随实际文本收窄，列内仍等宽", () => {
+  const items = [
+    { label: "5h", percent: 42 },
+    { label: "周", percent: 7 },
+  ]
+  const width = pctColumnWidth(items)
+  assert.equal(width, 3)
+  const cells = items.map((item) => padStartVisual(fmtPctInt(quotaPct(item)), width))
+  assert.deepEqual(cells, ["42%", " 7%"])
+  assert.equal(pctColumnWidth([{ label: "余额", text: "$3" }]), 0)
 })
 
 // ─── fmtResetTime：相对剩余时长（分 / 时 / 天，向下取整） ───

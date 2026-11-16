@@ -16,19 +16,17 @@ export function subagentStateOf(running: boolean, outcome: SubagentInfo["outcome
   return "stopped"
 }
 
-export function subagentStateLabel(state: SubagentState): string {
-  switch (state) {
-    case "running":
-      return "运行中"
-    case "succeeded":
-      return "完成"
-    case "failed":
-      return "失败"
-    case "interrupted":
-      return "中断"
-    case "stopped":
-      return "已停止"
-  }
+// 子代理名单：宿主的 family() 以 root 为键返回整个家族，且把 root 自己也放进列表。
+// 进入子会话时 family(child) − {child} 仍会含 root（root 在 spawn 期间一直 running，
+// 会被画成一条「运行中」并污染计数/合计/额度排序）。root 没有 parentID，据此排除；
+// 兄弟与孙级照旧保留（family 是整棵家族，不缩为直接子节点）。
+export function subagentIdsOf(
+  sessionID: string | undefined,
+  family: readonly string[],
+  parentIDOf: (id: string) => string | undefined,
+): string[] {
+  if (!sessionID) return []
+  return family.filter((other) => other !== sessionID && parentIDOf(other) !== undefined)
 }
 
 // 单条子代理的展示数据
@@ -101,18 +99,12 @@ export function clampElapsed(prev: number | undefined, next: number | undefined)
   return next > prev ? next : prev
 }
 
-// 模型 + 强度：`deepseek-v4.1-flash (high)`；无 variant 时省略括号
-export function modelLabel(modelID: string | undefined, variant: string | undefined): string {
-  if (!modelID) return ""
-  return variant ? `${modelID} (${variant})` : modelID
-}
-
 // 主行文字：标题优先；标题缺失（旧会话/未命名）时回退 agent 类型，不留空
 export function headingOf(row: SubagentRow): string {
   return row.title || row.agent
 }
 
-// 卡片头计数：运行中 / 已停止 / 失败。三个数各自独立，不把失败藏进「已停止」。
+// 卡片头计数：running / 非失败的已停止 / failed，三桶互斥，合计等于行数。
 export type SubagentCounts = { running: number; stopped: number; failed: number }
 
 export function subagentCounts(rows: readonly SubagentRow[]): SubagentCounts {
@@ -122,7 +114,7 @@ export function subagentCounts(rows: readonly SubagentRow[]): SubagentCounts {
     if (row.state ? row.state === "running" : row.running) running++
     if (row.state === "failed") failed++
   }
-  return { running, stopped: rows.length - running, failed }
+  return { running, stopped: rows.length - running - failed, failed }
 }
 
 // 标题行右端的合计。子代理单项就是真实累计消耗（含缓存读），加总有意义；

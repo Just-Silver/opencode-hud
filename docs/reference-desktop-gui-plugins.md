@@ -2,7 +2,7 @@
 
 # OpenCode Desktop GUI 插件开发手册（2.2.x）
 
-> 依据：本地源码 `E:\Code\Projects\Agent\Externals\opencode`（`packages/plugin` 与 `packages/desktop` 版本 2.2.0，commit `432d870b02`），与官方 V2 文档 <https://opencode.ai/v2/docs/build/plugins/gui> 对照后整理。凡文档未写、只在源码里成立的行为，标 **[源码]**。
+> 依据：本地宿主源码（当时在 `E:\Code\Projects\Agent\Externals\opencode`；`packages/plugin` 与 `packages/desktop` 版本 2.2.0，commit `432d870b02`；当前路径与版本见 `AGENTS.md`），与官方 V2 文档 <https://opencode.ai/v2/docs/build/plugins/gui> 对照后整理。凡文档未写、只在源码里成立的行为，标 **[源码]**。
 >
 > 状态：GUI 插件 API **实验性**，导出名带 `-experimental` 就是提醒；升级 OpenCode 后先跑一遍构建与冒烟再发版。
 
@@ -661,7 +661,7 @@ enabled → loading → active → (failed | disabled | reload → loading | 窗
 
 ---
 
-## 13. 源码地图（本地 `Externals\opencode`）
+## 13. 源码地图（当时本地宿主源码；当前路径见 `AGENTS.md`）
 
 | 路径 | 内容 |
 | --- | --- |
@@ -757,7 +757,7 @@ HTTP 侧对应 `POST /api/rpc/:rpcID/:method`（`packages/app/.../effect-*.js` �
 
 ### 15.4 槽位全集与真实跨度 **[源码]**
 
-第三方插件能用的 `SlotMap` 只有 4 个（`packages/plugin/src/gui/registries.ts:658`）：
+第三方插件能用的 `SlotMap` 只有 4 个（`packages/plugin/src/gui/registries.ts` 的 `SlotMap`）：
 
 | Slot | 真实位置 | 会话内 |
 | --- | --- | --- |
@@ -766,7 +766,7 @@ HTTP 侧对应 `POST /api/rpc/:rpcID/:method`（`packages/app/.../effect-*.js` �
 | `session.location.menu` | 项目/位置菜单内 | ✅ |
 | `session.panel.end` | 侧栏 tab 条尾部 | ✅ |
 
-**`window.bottom` 的跨度**（`packages/app/src/shell/shell.tsx:225-312`）：
+**`window.bottom` 的跨度**（`packages/app/src/shell/shell.tsx` 的 `window.bottom`；2.2.0 时约 225-312 行，当前宿主已漂移，按符号定位）：
 
 ```jsx
 <div class="flex-col">              // 窗口根

@@ -116,7 +116,7 @@ B 的代价是标题占掉顶边的一段（不影响列宽），换来与宿主
   - 后续（2026-11-15）：展开态右端已改为「下次刷新倒计时」（`↻ 04:32` / `重试 09:28` / `旧 12m`），折叠态仍为摘要优先，见 `docs/superpowers/specs/2026-11-15-quota-refresh-countdown.md`。
 - 展开区：左侧一条 `Border` 色竖线 + 内缩，条目用共享渲染器（标签列定宽，进度条左缘对齐）。
 - 颜色语义：百分比是「已用占比」——低=次级灰、≥50%=警告橙、≥85%=危险红；**没有缓存就不出行、失败不画 0%**，有缓存时失败仍展示缓存并标注年龄。
-- 数据新鲜度来自 `额度Store.status`（`phase/fetching/ageMs/stale/error`），不把缓存数据伪装成实时数据。
+- 数据新鲜度来自 `QuotaStore.status`（`phase/fetching/ageMs/stale/error`），不把缓存数据伪装成实时数据。
 
 ### 5.3 子代理卡片
 
@@ -126,6 +126,8 @@ B 的代价是标题占掉顶边的一段（不影响列宽），换来与宿主
 - 展开详情：完整标题、状态、模型（含 variant）、代理、命中率、性能；空值行不渲染。
 - 历史折叠：常驻最近 5 条已完成，其余进「还有 N 条已完成」；运行中不设上限。
 - 表尾：`收起`（有展开项时可点）+ `总量` 合计（始终显示）。
+
+> **后续变更（2026-11-11，`afeaf97` / `394aa41`；2026-11-16 审计注记）**：`afeaf97` 把表尾改为「有展开项时 `收起` 顶替合计」；`394aa41` 把已停止结局（成功 / 中断 / 未知）统一为黄色、失败红色。上面是当时的设计决策，不代表当前行为。另：审计时 `subagentCounts.stopped` 为全部非运行中、包含 `failed`，与本节「三个数各自独立」及下表「失败不被合并」不一致；用户已确认互斥三桶并于 2026-11-16 实施；本节原设计文字保留。
 
 ### 5.4 Footer / 更新提示
 
@@ -137,13 +139,13 @@ B 的代价是标题占掉顶边的一段（不影响列宽），换来与宿主
 | 改动 | 位置 | 说明 |
 | --- | --- | --- |
 | `SessionInfo.outcome` 进入 `SubagentInfo` | `model/types.ts`、`model/subagent.ts` | 宿主在 execution 终态写 `idle_outcome`，只在 `运行中=false` 时采信 |
-| `额度Status` + `updatedAt` | `model/types.ts`、`model/额度.ts` | 展示元信息；`updatedAt` 只在成功写入时更新，失败不清空缓存年龄 |
-| `额度StatusTrail` / `额度ErrorLabel` | `model/额度.ts` | 纯函数：在途 / 失败原因+年龄 / 过期 / 折叠前缀 |
+| `QuotaStatus` + `updatedAt` | `model/types.ts`、`model/quota.ts` | 展示元信息；`updatedAt` 只在成功写入时更新，失败不清空缓存年龄 |
+| `quotaStatusTrail` / `quotaErrorLabel` | `model/quota.ts` | 纯函数：在途 / 失败原因+年龄 / 过期 / 折叠前缀 |
 | `subagentCounts` | `model/subagent.ts` | 运行中 / 已停止 / 失败三计数，失败不被合并 |
 | `fmtAge` | `shared/format.ts` | 新鲜度短格式（刚刚 / 3m / 2.4h / 3d） |
-| ViewModel 拆分 | `view/hooks/useSessionStats.ts`、`use子代理.ts`、`use额度.ts`、`useUpdate.ts` | 信号/副作用仍在渲染期创建（owner 正确），组件只做编排 |
-| 额度加载去抖 | `view/hooks/use额度.ts` | 目标集合按 `join` 键比较后再加载；60s 心跳负责探测 + 限流刷新 + 刷新年龄 |
-| 子代理供应商推导 | `view/hooks/use子代理.ts` | 从已组装的行推导并按内容比较，避免 1s 心跳连带重算额度 |
+| ViewModel 拆分 | `view/hooks/useSessionStats.ts`、`useSubagents.ts`、`useQuota.ts`、`useUpdate.ts` | 信号/副作用仍在渲染期创建（owner 正确），组件只做编排 |
+| 额度加载去抖 | `view/hooks/useQuota.ts` | 目标集合按 `join` 键比较后再加载；60s 心跳负责探测 + 限流刷新 + 刷新年龄 |
+| 子代理供应商推导 | `view/hooks/useSubagents.ts` | 从已组装的行推导并按内容比较，避免 1s 心跳连带重算额度 |
 | 更新检查去重 | `view/hooks/useUpdate.ts` | 进程内共享同一个 `checkForUpdate` Promise |
 
 竞态与生命周期：额度按凭据指纹分桶（切号即作废旧数据）与并发去重仍在 store；子代理展开态不跨会话复用；定时器全部 `onCleanup`。
@@ -152,8 +154,8 @@ B 的代价是标题占掉顶边的一段（不影响列宽），换来与宿主
 
 自动化（`node --test tests/*.test.ts`，189 例全绿）：
 
-- `额度Store.status`：未请求 / 在途 / 新鲜 / 过期 / 失败保留缓存 / 从未成功 / 错误归因；读状态不发请求。
-- `额度StatusTrail` / `额度ErrorLabel`：展开与折叠、刷新中优先、失败带缓存年龄、无数据不硬凑文案。
+- `QuotaStore.status`：未请求 / 在途 / 新鲜 / 过期 / 失败保留缓存 / 从未成功 / 错误归因；读状态不发请求。
+- `quotaStatusTrail` / `quotaErrorLabel`：展开与折叠、刷新中优先、失败带缓存年龄、无数据不硬凑文案。
 - 子代理：`outcome` → 状态映射、`subagentCounts` 三计数、供应商推导、排序/裁剪/耗时高水位。
 - `tokenMix`：分段合并、零分量、总和守恒；`fmtAge` 边界。
 

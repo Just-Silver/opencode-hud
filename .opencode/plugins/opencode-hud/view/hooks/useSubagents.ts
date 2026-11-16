@@ -5,7 +5,7 @@ import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { usePlugin } from "@opencode/plugin/tui"
 import type { PerfMessage, SubagentInfo } from "../../model/types.ts"
 import { latestPerf } from "../../model/perf.ts"
-import { buildRow, runningProviderIDs, sortRows, SPINNER_INTERVAL_MS, type SubagentRow } from "../../model/subagent.ts"
+import { buildRow, runningProviderIDs, sortRows, SPINNER_INTERVAL_MS, subagentIdsOf, type SubagentRow } from "../../model/subagent.ts"
 
 // sessionID 传 getter：组件体只执行一次，传值会把 family/content 钉在首帧的会话上。
 export function useSubagents(sessionID: () => string | undefined) {
@@ -15,12 +15,11 @@ export function useSubagents(sessionID: () => string | undefined) {
   const [expanded, setExpanded] = createSignal<Record<string, boolean>>({})
   const [subTick, setSubTick] = createSignal(0)
 
-  // family() 已包含全部子会话（只增不减），去掉自身
+  // family() 是整棵家族（只增不减）且含 root 自己：排除自身与根会话（见 subagentIdsOf）
   const subagentIds = createMemo<string[]>(() => {
     const id = sessionID()
     if (!id) return []
-    const family = ctx.data.session.family(id) ?? []
-    return family.filter((other: string) => other !== id)
+    return subagentIdsOf(id, ctx.data.session.family(id) ?? [], (other) => ctx.data.session.get(other)?.parentID)
   })
 
   // 运行中的 id 集合：perfTargets 与 rows 共用，避免同一轮为同一个 id 查两次 status

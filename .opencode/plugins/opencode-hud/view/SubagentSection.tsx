@@ -199,7 +199,7 @@ function Counts(props: {
 
 export function SubagentSection(props: {
   rows: readonly SubagentRow[]
-  /** 动画帧号；由 Sidebar 的运行态心跳驱动 */
+  /** 动画帧号；由 useSubagents 的 80ms 运行态 interval 驱动 */
   frame: number
   onToggle: (id: string) => void
   onCollapseAll: () => void

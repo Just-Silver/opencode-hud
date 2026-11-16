@@ -70,7 +70,9 @@ OK    Codex Usage             4%   █░░░░░░░░░░░░░░
 6. **5min 刷新 + 供应商级失败隔离**是主流，比我们更保守的没有；展示 stale/失败状态而不是清空。
 7. 再往上一层是「按余量选 provider / 自动轮换」（claudexor、opencode-quota-agent-tool），说明多订阅数据的下一步复用是选路。
 
-## 与本项目现状的差距
+## 与本项目现状的差距（改造前，2026-11-11 前）
+
+> 本节记录改造前的状态，不是当前实现。该能力已于 2026-11-11 实现，设计见 `docs/superpowers/specs/2026-11-11-multi-provider-quota-design.md`；当前规则以 AGENTS「额度（quota/）」为准。
 
 - 现在额度块由会话 `providerID` 单点决定（`view/Sidebar.tsx`），只显示一个供应商。
 - 供应商发现已经具备（`quota/index.ts` 扫 `providers/*.ts`），缺的只是「列出全部启用供应商」的出口。

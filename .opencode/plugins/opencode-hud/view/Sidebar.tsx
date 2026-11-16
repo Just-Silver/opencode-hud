@@ -44,7 +44,7 @@ export function Sidebar(props: { sessionID?: string }): JSX.Element {
           )}
         </Show>
         {/* 额度不依赖会话用量：新会话还没有 token 时，已登录订阅照样要能看 */}
-        <QuotaSection rows={quota.rows()} now={quota.now} onToggle={quota.toggle} />
+        <QuotaSection rows={quota.rows()} onToggle={quota.toggle} />
         <SubagentSection
           rows={agents.rows()}
           frame={agents.frame()}

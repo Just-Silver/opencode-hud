@@ -3,7 +3,7 @@
 // 额度条目（渲染原语；数量/顺序/标签/形态全部由 provider 决定，UI 不预设窗口）
 // - percent：有 → 进度条 + 百分比（0-100，供应商决定精度）
 // - text：无 percent 时的值文本（如 "$12.34" / "不限" / "19/100"），右对齐
-// - hint：行尾弱化注记（自由文本，如 "↻ 周一"）；provider 用 shared/format 自行格式化
+// - hint：行尾弱化注记（自由文本，如 "↻ 4h12m"）；provider 用 shared/format 自行格式化
 export type QuotaItem = {
   label: string
   percent?: number
@@ -57,8 +57,14 @@ export type UsageData = {
   total: number
 }
 
-// 会话消息的结构化子集（tokens / provider / model 字段），供纯函数解析
+// 会话消息的结构化子集（判别字段 / tokens / provider / model），供纯函数解析
 export type MessageLike = {
+  /** revert 边界按 id 定位 */
+  id?: string
+  /** assistant / user / compaction 等；上下文只认 assistant */
+  type?: string
+  /** compaction 的 running / completed / failed */
+  status?: string
   tokens?: {
     input?: number
     output?: number
@@ -99,6 +105,8 @@ export type PerfMessage = {
 // 仅在 running=false 时代表本次运行的结局（运行中它仍是上一轮的旧值）。
 export type SubagentInfo = {
   id: string
+  /** 父会话 id；根会话没有该字段（子代理名单据此排除 family 里的 root） */
+  parentID?: string
   agent?: string
   title?: string
   tokens?: TokenLike

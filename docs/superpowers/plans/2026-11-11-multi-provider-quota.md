@@ -1,3 +1,5 @@
+<!-- 职责：记录 2026-11-11 多订阅额度展示的实施步骤与当时验收（历史计划；含一处执行勘误）；不写：当前额度规则（见 AGENTS.md 与对应 spec）。 -->
+
 # 额度区块：展示全部已登录订阅 实施计划
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -450,6 +452,8 @@ git commit -m "feat(hud): 额度区块展示全部已登录订阅并支持逐组
 在「当前已启用：…」之前补一条：
 
 > - 额度区块展示**本机全部有凭据的已启用供应商**（`listProviders` + 凭据探测，5min TTL；无凭据不出现、不记日志）。排序：当前会话 → 本会话运行中子代理在用 → 其余注册顺序；只展开当前会话那组（无额度数据时退化为第一行），其余折叠成一行、点击就地展开，折叠摘要取已用最多的一条。手动展开态存模块级 Map，跨重建保持。
+
+> **执行勘误（落地时按 spec §3.3 修正）**：当前会话供应商没有额度数据时 `defaultPid = undefined`，**全部折叠**（不猜哪条重要），不是「退化为第一行」。上面这句是计划笔误。
 
 - [ ] **Step 3: 设计文档状态**
 

@@ -22,23 +22,24 @@ export function pluginDataDir(): string {
   return join(localAppDataDir(), "opencode-hud")
 }
 
+// opencode 的全局配置根（宿主 packages/util/src/global.ts）：
+//   OPENCODE_CONFIG_DIR 的值就是配置根本身，不再拼 opencode；否则 $XDG_CONFIG_HOME/opencode。
+// 与安装 / 卸载脚本必须保持同一规则，否则插件会装到宿主不会加载的目录。
+export function globalConfigDir(): string {
+  const explicit = process.env.OPENCODE_CONFIG_DIR?.trim()
+  if (explicit) return explicit
+  const base = process.env.XDG_CONFIG_HOME?.trim()
+  return join(base ? base : join(homedir(), ".config"), "opencode")
+}
+
 // opencode 的「全局插件目录」（与安装脚本 install.sh / install.ps1 一致）：
-//   $XDG_CONFIG_HOME/opencode/plugins（默认 ~/.config/opencode/plugins；Windows 取 $HOME/.config）
+//   <全局配置根>/plugins
 // ⚠️ 这是 opencode 发现插件的位置，用于一键更新时的替换目标；
 //    与 pluginDataDir()（本插件自己的缓存/日志数据目录）是两回事，勿混。
 export function globalPluginsDir(): string {
-  const base = process.env.XDG_CONFIG_HOME?.trim()
-  return join(base ? base : join(homedir(), ".config"), "opencode", "plugins")
+  return join(globalConfigDir(), "plugins")
 }
 
 export function globalPluginDir(): string {
   return join(globalPluginsDir(), "opencode-hud")
-}
-
-// 改名前的目录名（v4.1.x 及更早）：老用户升级后新旧目录会并存，两边都注册同样两个 slot，
-// 侧栏与性能块会重复渲染。安装 / 更新 / 卸载流程必须顺手清掉它。
-export const LEGACY_PLUGIN_DIR_NAME = "opencode-tui-usage"
-
-export function legacyGlobalPluginDir(): string {
-  return join(globalPluginsDir(), LEGACY_PLUGIN_DIR_NAME)
 }

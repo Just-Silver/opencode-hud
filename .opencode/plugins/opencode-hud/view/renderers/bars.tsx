@@ -10,12 +10,11 @@
 /** @jsxImportSource @opentui/solid */
 import { For, Show, type JSX } from "solid-js"
 import type { QuotaItem } from "../../model/types.ts"
-import { fmtPctInt, padEndVisual, quotaPct, truncateVisual, visualWidth } from "../../shared/format.ts"
+import { fmtPctInt, padEndVisual, padStartVisual, pctColumnWidth, quotaPct, truncateVisual, visualWidth } from "../../shared/format.ts"
 import { ColorBar } from "../ColorBar.tsx"
 import { MUTED_COLOR, SECONDARY_COLOR, usageColor } from "../theme.ts"
 
-// 百分比列宽（fmtPctInt 最长 "100%" = 4 列，定宽右对齐）
-const PCT_WIDTH = 4
+// 百分比列宽由同组实际格式化结果决定（供应商可给小数，固定 4 列会让右缘差 1 列）
 // 标签列宽上限：再长的标签会把进度条挤没，宁可截断标签也不压条
 const LABEL_MAX = 8
 
@@ -23,6 +22,7 @@ const LABEL_MAX = 8
 function RendererRow(props: {
   item: QuotaItem
   labelWidth: number
+  pctWidth: number
   hintWidth: number
   showHint: boolean
 }): JSX.Element {
@@ -37,7 +37,7 @@ function RendererRow(props: {
         <ColorBar pct={pct()} color={usageColor(pct())} />
       </Show>
       <Show when={pct() !== undefined} fallback={<text fg={SECONDARY_COLOR}>{props.item.text ?? ""}</text>}>
-        <text fg={usageColor(pct())}>{fmtPctInt(pct()).padStart(PCT_WIDTH)}</text>
+        <text fg={usageColor(pct())}>{padStartVisual(fmtPctInt(pct()), props.pctWidth)}</text>
       </Show>
       <Show when={props.showHint}>
         <text fg={MUTED_COLOR}>{padEndVisual(props.item.hint ?? "", props.hintWidth)}</text>
@@ -47,12 +47,13 @@ function RendererRow(props: {
 }
 
 export function BarsRenderer(props: { items: QuotaItem[] }): JSX.Element {
-  // 标签 / hint 列宽 = 区块内最宽值；全无 hint → 不出该列
+  // 标签 / 百分比 / hint 列宽 = 区块内实际显示文本的最宽值；全无 hint → 不出该列
   const labelWidth = () =>
     Math.min(
       LABEL_MAX,
       props.items.reduce((w, it) => Math.max(w, visualWidth(it.label)), 0),
     )
+  const pctWidth = () => pctColumnWidth(props.items)
   const hintWidth = () => props.items.reduce((w, it) => Math.max(w, visualWidth(it.hint ?? "")), 0)
   const showHint = () => hintWidth() > 0
   return (
@@ -62,6 +63,7 @@ export function BarsRenderer(props: { items: QuotaItem[] }): JSX.Element {
           <RendererRow
             item={item}
             labelWidth={labelWidth()}
+            pctWidth={pctWidth()}
             hintWidth={hintWidth()}
             showHint={showHint()}
           />

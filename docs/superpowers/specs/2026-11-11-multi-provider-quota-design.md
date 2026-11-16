@@ -5,6 +5,7 @@
 - 日期：2026-11-11
 - 状态：**已实现**（2026-11-11）
 - 后续：HUD 5.0 在同一数据上补了新鲜度/失败注记（`QuotaStore.status` + `quotaStatusTrail`），见 `docs/superpowers/specs/2026-11-11-heavy-dashboard-design.md`；本文的发现、排序、折叠规则保持不变。
+- 后续变更（2026-11-16 注记）：本文 §3.6「`hasContent()` 维持现状：额度仍嵌在会话用量块内」与 §8「不做 stale 标记」已被 HUD 5.0 取代——额度独立门控、`updatedAt/stale` 与 `旧 12m` 前缀；以 AGENTS 与 heavy-dashboard 设计为准。正文保留当时决策。
 - 落点：`sidebar.content` → `QuotaSection`
 - 前提：opencode2 v2；不改宿主；沿用 42 列侧栏、5min 刷新、零配置
 

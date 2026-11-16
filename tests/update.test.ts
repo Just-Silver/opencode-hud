@@ -11,7 +11,6 @@ import {
 import {
   resolveUpdate,
   fetchLatestTag,
-  parseTagFromReleaseUrl,
   isCacheFresh,
   readUpdateCache,
   writeUpdateCache,
@@ -64,23 +63,37 @@ test("resolveUpdate：远程非法版本 → 不提示", () => {
   assert.equal(resolveUpdate("1.0.0", "latest"), undefined)
 })
 
-// ─── index.ts parseTagFromReleaseUrl ───
-test("parseTagFromReleaseUrl：提取 tag（容忍 v 前缀 / 查询串 / 编码）", () => {
-  assert.equal(parseTagFromReleaseUrl("https://github.com/o/r/releases/tag/v1.1.0"), "v1.1.0")
-  assert.equal(parseTagFromReleaseUrl("https://github.com/o/r/releases/tag/v1.1.0?x=1"), "v1.1.0")
-  assert.equal(parseTagFromReleaseUrl("https://github.com/o/r/releases/tag/v1.1.0%2Bmeta"), "v1.1.0+meta")
-  assert.equal(parseTagFromReleaseUrl("https://github.com/o/r/releases/latest"), undefined)
-  assert.equal(parseTagFromReleaseUrl(undefined), undefined)
+test("resolveUpdate：只认带 v 的正式 SemVer", () => {
+  assert.equal(resolveUpdate("1.0.0", "v1.1.0-rc.1"), undefined)
+  assert.equal(resolveUpdate("1.0.0", "1.1.0"), undefined)
+  assert.equal(resolveUpdate("1.0.0", "v1.1.0.0"), undefined)
+  assert.deepEqual(resolveUpdate("1.0.0", "v1.1.0"), {
+    latestVersion: "1.1.0",
+    name: "v1.1.0",
+    body: undefined,
+  })
 })
 
 // ─── index.ts fetchLatestTag（mock fetch，302 跳转） ───
-test("fetchLatestTag：302 Location → tag", async () => {
-  const mock = (async () =>
-    new Response(null, {
-      status: 302,
-      headers: { location: "https://github.com/Just-Silver/opencode-hud/releases/tag/v1.1.0" },
-    })) as unknown as typeof fetch
-  assert.equal(await fetchLatestTag(mock), "v1.1.0")
+test("fetchLatestTag：只有 3xx 且 Location 指向本仓库正式 tag 才算最新", async () => {
+  const respond = (status: number, location?: string): typeof fetch =>
+    (async () => new Response(null, { status, headers: location ? { location } : {} })) as unknown as typeof fetch
+
+  const tag = "v1.1.0"
+  const trusted = `https://github.com/Just-Silver/opencode-hud/releases/tag/${tag}`
+  assert.equal(await fetchLatestTag(respond(302, trusted)), tag)
+  assert.equal(await fetchLatestTag(respond(301, `/Just-Silver/opencode-hud/releases/tag/${tag}`)), tag)
+
+  assert.equal(await fetchLatestTag(respond(200)), undefined)
+  assert.equal(
+    await fetchLatestTag(respond(302, "https://github.com/other/repo/releases/tag/v1.1.0")),
+    undefined,
+  )
+  assert.equal(await fetchLatestTag(respond(302, `${trusted}?x=1`)), undefined)
+  assert.equal(
+    await fetchLatestTag(respond(302, "https://github.com/Just-Silver/opencode-hud/releases/tag/v1.1.0-rc.1")),
+    undefined,
+  )
 })
 
 test("fetchLatestTag：无 Release（404 / 无 Location）/ 网络失败 → undefined", async () => {
@@ -217,6 +230,22 @@ test("checkForUpdate：缓存过期 + 失败 → 仅更新 lastAttemptAt，保�
   })
   assert.deepEqual(written, { lastAttemptAt: now, lastSuccessAt: now - 25 * H, latest: "v99.0.0" })
   assert.deepEqual(info, { latestVersion: "99.0.0", name: "v99.0.0", body: undefined })
+})
+
+test("checkForUpdate：非法/预发布不写入 latest，只推 lastAttemptAt", async () => {
+  const now = 30 * H
+  let written: UpdateCheckCache | undefined
+  const info = await checkForUpdate({
+    cachePath: "unused",
+    now: () => now,
+    readCache: () => undefined,
+    writeCache: (_p, c) => {
+      written = c
+    },
+    fetchTag: async () => "v1.1.0-rc.1",
+  })
+  assert.deepEqual(written, { lastAttemptAt: now, lastSuccessAt: undefined, latest: undefined })
+  assert.equal(info, undefined)
 })
 
 // ─── index.ts markUpdated（更新成功后清缓存） ───

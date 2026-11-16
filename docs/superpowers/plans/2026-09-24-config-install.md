@@ -1,3 +1,5 @@
+<!-- 职责：记录 2026-09-24 配置安装改造的实施步骤（已废止，历史计划）；不写：现行安装方式与完整根因（见 docs/config-install.md）。 -->
+
 # opencode-tui-usage「配置安装」分发改造 Implementation Plan
 
 > ⚠️ **已废止（2026-09-24 回退）**：配置安装对 TUI 插件存在双 Solid 缺陷（只画首帧、不再刷新：侧边栏首次为空、切一次会话才显示），已回退脚本安装；方法学保留在 `docs/config-install.md`。本 plan 仅作历史记录。
@@ -168,6 +170,8 @@ $proj = Join-Path $env:TEMP "oc-probe-a"
 New-Item -ItemType Directory -Force $proj | Out-Null
 Set-Content -Path (Join-Path $proj "opencode.jsonc") -Value '{ "$schema": "https://opencode.ai/config.json", "plugins": ["file:///E:/Code/Projects/Agent/opencode-tui-usage"] }' -Encoding utf8
 ```
+
+> 历史命令注记：`E:/Code/Projects/Agent/opencode-tui-usage` 是 2026-09-24 时的本机路径，现已迁移/不存在；本条不保证当前可原样执行。
 
 - [ ] **Step 2: 启动私有 server 看插件解析日志**
 

@@ -10,7 +10,7 @@ import { useTerminalDimensions } from "@opentui/solid"
 import { fmtPerf, fmtSec, fmtTpsText } from "../shared/format.ts"
 import { MUTED_COLOR, TEXT_COLOR } from "./theme.ts"
 
-// 两档阈值：≥60 完整（时长 · 速度），<60 只留速度（60 跟随宿主 showDetails 收缩位）
+// 两档阈值：≥60 完整（时长 · 速度），<60 只留速度（60 是本插件自身的列宽预算）
 const COMPACT_MIN_WIDTH = 60
 
 type Level = "full" | "minimal"

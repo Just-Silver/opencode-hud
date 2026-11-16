@@ -3,7 +3,7 @@
 <!-- 职责：记录 OpenDesign（open-design.ai）额度查询的源码链路、可用端点、凭据与实测结论；不写：HUD 通用额度契约与渲染实现（见 model/types.ts、view/renderers/）。 -->
 
 - 探测日期：2026-10-06；复核：2026-10-22、2026-11-02
-- 目标：判断能否为插件新增 `open-design` 供应商（对齐 `quota/providers/<name>.ts` 契约：一个 HTTP GET + `Authorization: Bearer <凭据>` → `QuotaData`）
+- 目标：判断能否为插件新增 `open-design` 供应商。目标契约仍是单次 GET（`apiUrl` + `Authorization: Bearer <凭据>` → `QuotaData`）；但 OpenDesign 实际链路需要先取 workspaceId 再查 preflight/funding-check（§0.3），且凭据来自插件契约之外的 `~/.amr/config.json` / `VELA_CONTROL_KEY`，需在 provider 内自取——这不是「现有 `apiUrl + key` 契约一次 GET 即可套用」的已证明接入流程。
 - 前提：最初只评估「仅 OpenCode + 推理 API Key」；2026-11-02 追加验证「本机有 `vela login` 写入的 Control Key」这条路径。
 - 参考仓库：`https://github.com/nexu-io/open-design`（Apache-2.0，Electron + daemon + web monorepo）
 - **最终结论（2026-11-02 复核）**：周额度（7d）与五小时（5h）都能取，但凭据必须是 **Control Key（`vela_ctrl_…`）**；推理 API Key（`sk-amr-…`）仍没有任何额度端点。2026-11-02 已用本机 Go 套餐实测通过，源码链路与实测见 §0。
@@ -144,7 +144,7 @@ GET  /api/v1/collab/events?codingPlanUsageEvents=1       ← SSE 实时用量变
 
 - 见 §0.3：**可以接入**，但依赖 `~/.amr/config.json` 里的 Control Key；仅推理 API Key（`sk-amr-…`）仍无任何额度端点。
 - 现有 provider 契约只传 `apiUrl + apiKey`，若实现需在 provider 内部自行读取 Control Key 与 workspaceId（或扩展契约，后者须先与用户确认）。
-- 没有 `~/.amr/config.json` / Control Key 时，按「无数据区块不渲染」处理（与 deepseek 同）。
+- 没有 `~/.amr/config.json` / Control Key 时，按「无数据区块不渲染」处理（与其他无数据供应商一致）。
 - 具体端点、字段与实测结果统一见 §0，本节不再重复。
 
 ## 6. 如需复验

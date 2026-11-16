@@ -18,7 +18,7 @@ header = """
 
 # 正文模板（每个版本一节）
 body = """
-{% if version %}## [{{ version | trim_start_matches(pat="v") }}]{% if timestamp %} - {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
+{% if version %}## [{{ version | trim_start_matches(pat="v") }}](https://github.com/Just-Silver/opencode-hud/{% if previous.version %}compare/{{ previous.version }}...{{ version }}{% else %}releases/tag/{{ version }}{% endif %}){% if timestamp %} - {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
 
 {% endif %}{% for group, commits in commits | group_by(attribute="group") %}
 ### {{ group }}
@@ -26,26 +26,6 @@ body = """
 - {% if commit.scope %}**{{ commit.scope }}** {% endif %}{{ commit.message | upper_first }}{% if commit.breaking %}（破坏性变更）{% endif %}{% if commit.links %}（{{ commit.links | join(separator=", ") }}）{% endif %}
 {%- endfor %}
 {% endfor %}
-"""
-
-# 版本间链接（GitHub 标准格式）
-template = """
-{% for version in versions %}
-[{{ version.version | trim_start_matches(pat="v") }}]: https://github.com/Just-Silver/opencode-hud/compare/v{{ previous.version }}...v{{ version.version }}
-{% endfor %}
-"""
-
-# 未发布版本占位（--unreleased 时用）
-unreleased = """
-{% if version %}## [{{ version | trim_start_matches(pat="v") }}]{% if timestamp %} - {{ timestamp | date(format="%Y-%m-%d") }}{% endif %}
-
-{% endif %}{% for group, commits in commits | group_by(attribute="group") %}
-### {{ group }}
-{% for commit in commits %}
-- {% if commit.scope %}**{{ commit.scope }}** {% endif %}{{ commit.message | upper_first }}{% if commit.breaking %}（破坏性变更）{% endif %}
-{%- endfor %}
-{% endfor %}
-
 """
 
 [git]
@@ -65,6 +45,9 @@ commit_parsers = [
   { message = "^test",      group = "测试" },
   { message = "^build",     group = "构建" },
   { message = "^ci",        group = "CI" },
+  # 只跳过发版工作流自己提交的 CHANGELOG 更新；未来真实的 CHANGELOG 脚本变更仍应出现在日志里
+  { message = "^chore(\\(.*\\))?: .*更新 CHANGELOG", skip = true },
+  { message = "^更新 CHANGELOG",   skip = true },
   { message = "^chore",     group = "杂项" },
   { message = "^revert",    group = "回滚" },
   # 兜底：其余（含中文提交）归入"其他"

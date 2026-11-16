@@ -39,7 +39,7 @@
 
 对方 `src/v2/index.tsx`：`app` 插槽挂 `RuntimeRoot`，**与侧边栏是否挂载无关**，负责偏好恢复、余额轮询、自动切换、子代理视图清理、命令注册；`sidebar.content` 只挂纯展示面板。
 
-- 我们目前所有逻辑（quota store、轮询定时器、更新检查）都在 `view/Sidebar.tsx` 里，侧边栏折叠/窄屏时副作用随之消失；`updateDismissedOnce` 也用模块级变量凑合。
+- 我们目前所有逻辑（quota store、轮询定时器、更新检查）都在 `view/Sidebar.tsx` 里（**2026-11-11 前**；现已拆到 `view/hooks/useQuota.ts`、`useSubagents.ts`、`useUpdate.ts`、`useSessionStats.ts`，仍随 Sidebar 挂载/卸载），侧边栏折叠/窄屏时副作用随之消失；`updateDismissedOnce` 也用模块级变量凑合。
 - 对方把 `context.keymap.layer(() => ({mode:"global", commands}))` 放在常驻层 → 窄屏/隐藏侧边栏时斜杠命令仍可用（**我们不采用**）。
 
 **宿主契约核对（2.0.32）**：

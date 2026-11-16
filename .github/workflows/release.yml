@@ -1,70 +1,220 @@
 name: Release
 
-# 手动打 tag 触发（GitHub 官方标准发布流程）：
-#   改 update/version.ts 的 VERSION → commit → git tag v1.1.0 → git push origin v1.1.0
+# 唯一发版入口（不手改 CHANGELOG.md、不手工上传资产）：
+#   改 .opencode/plugins/opencode-hud/update/version.ts 的 VERSION → commit 到 main →
+#   git tag vX.Y.Z → git push origin vX.Y.Z
+# 只接受正式版 tag（vX.Y.Z），且 tag 必须是 main 的祖先；资产 = opencode-hud-vX.Y.Z.tar.gz + .sha256。
 on:
   push:
     tags:
       - "v*"
 
+# 同一仓库的发版串行执行：后到的 tag 排队等待，不取消正在发的那次。
+concurrency:
+  group: release-${{ github.repository }}
+  cancel-in-progress: false
+
 permissions:
-  contents: write # 生成 CHANGELOG 提交 + gh release 都需要
+  contents: read # workflow 级最小权限；需要写权限的 job 各自显式声明
 
 jobs:
-  release:
+  preflight:
+    name: preflight（tag / VERSION / 来源分支）
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0 # git-cliff 需要完整历史（按 tag 分组）
+          fetch-depth: 0
+          fetch-tags: true
 
-      - name: 校验 tag 与 VERSION 一致
-        id: version
+      - name: 校验正式 tag、VERSION 一致、tag 来自 main
         run: |
-          TAG="${GITHUB_REF_NAME#v}"
-          IN_CODE="$(grep -oP 'VERSION = "\K[0-9]+\.[0-9]+\.[0-9]+' .opencode/plugins/opencode-hud/update/version.ts)"
-          echo "tag=$TAG"
-          echo "code=$IN_CODE"
-          if [ "$TAG" != "$IN_CODE" ]; then
-            echo "::error::tag ($TAG) 与 update/version.ts VERSION ($IN_CODE) 不一致"
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          if ! [[ "$TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::只允许正式版 tag（vX.Y.Z），不发布预发布/构建元数据：$TAG"
             exit 1
           fi
-          echo "version=$TAG" >> "$GITHUB_OUTPUT"
 
-      - name: 生成 CHANGELOG.md（git-cliff 全量）
-        uses: orhun/git-cliff-action@v4
+          VERSION_FILE=".opencode/plugins/opencode-hud/update/version.ts"
+          # 只在子 shell 关掉 pipefail：sed 多行命中时 head 提前退出会给 sed 发 SIGPIPE，
+          # 打开 pipefail 会把这条正常截断当成失败。
+          VERSION="$(set +o pipefail; sed -n 's/^export const VERSION = "\([0-9][0-9]*\.[0-9][0-9]*\.[0-9][0-9]*\)".*$/\1/p' "$VERSION_FILE" | head -n 1)"
+          VERSION="${VERSION%$'\r'}"
+          if [ -z "$VERSION" ]; then
+            echo "::error::无法从 $VERSION_FILE 读取 VERSION"
+            exit 1
+          fi
+          if [ "$TAG" != "v$VERSION" ]; then
+            echo "::error::tag ($TAG) 与 update/version.ts VERSION (v$VERSION) 不一致"
+            exit 1
+          fi
+          echo "tag=$TAG version=$VERSION"
+
+          # annotated tag 的 $GITHUB_SHA 是 tag 对象而不是提交；先 peel 成 commit 再判断来源。
+          TAG_COMMIT="$(git rev-parse "$GITHUB_REF_NAME^{commit}")"
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+            echo "::error::tag 所在提交（$TAG_COMMIT）不在 origin/main 上；发版必须从 main 打 tag"
+            exit 1
+          fi
+
+  verify:
+    name: verify（CI 门禁）
+    needs: preflight
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    name: release（资产 + draft 发布）
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 创建/上传 Release 资产
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          config: cliff.toml
-          args: --verbose
-        env:
-          OUTPUT: CHANGELOG.md # 全量输出到 CHANGELOG.md
+          fetch-depth: 0 # git-cliff --current 需要 tag 与完整历史
 
-      # 必须放在「提交 CHANGELOG 回仓库」之前：git-cliff --current 要求 HEAD 带 tag，
-      # 而提交 CHANGELOG 会新建一个未打 tag 的提交，导致 --current 报 No tag exists for the current commit
+      - name: 构建可复现资产与 sidecar
+        run: bash scripts/build-release-asset.sh "$GITHUB_REF_NAME" dist
+
       - name: 生成当前版本 Release 说明（--current）
-        id: current
-        uses: orhun/git-cliff-action@v4
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
         with:
           config: cliff.toml
           args: --current --strip header
         env:
-          OUTPUT: /tmp/RELEASE_BODY.md # 仅当前版本变更
+          OUTPUT: release-body.md
 
-      - name: 提交 CHANGELOG 回仓库
+      - name: 上传资产到 draft Release（公开态拒绝覆盖）
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          ASSET="opencode-hud-$TAG.tar.gz"
+          SIDECAR="$ASSET.sha256"
+          for path in "dist/$ASSET" "dist/$SIDECAR"; do
+            test -f "$path" || { echo "::error::缺少构建产物：$path"; exit 1; }
+          done
+
+          # 只有 gh 明确报 not found 才算不存在；其它非零（鉴权/网络）一律失败，避免误建。
+          if gh release view "$TAG" >/dev/null 2>release-view.err; then
+            EXISTS=1
+          elif grep -qi 'not found' release-view.err; then
+            EXISTS=0
+          else
+            cat release-view.err
+            echo "::error::无法确认 Release $TAG 是否存在"
+            exit 1
+          fi
+
+          if [ "$EXISTS" = "1" ]; then
+            IS_DRAFT="$(gh release view "$TAG" --json isDraft --jq .isDraft)"
+            echo "Release $TAG 已存在，isDraft=$IS_DRAFT"
+            if [ "$IS_DRAFT" != "true" ]; then
+              echo "::error::Release $TAG 已发布，拒绝覆盖资产"
+              exit 1
+            fi
+            # draft 重跑：先按本次两个资产名删除旧文件，再重新上传（不用 --clobber）。
+            # 资产名先落到变量再在 herestring 上匹配，避免 `gh ... | grep -q` 提前退出触发 SIGPIPE。
+            ASSETS="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+            for name in "$ASSET" "$SIDECAR"; do
+              if grep -Fxq "$name" <<< "$ASSETS"; then
+                gh release delete-asset "$TAG" "$name" --yes
+              fi
+            done
+            gh release edit "$TAG" --notes-file release-body.md
+          else
+            gh release create "$TAG" --draft --verify-tag --title "$TAG" --notes-file release-body.md
+          fi
+
+          gh release upload "$TAG" "dist/$ASSET" "dist/$SIDECAR"
+
+          # 从 Release 回读两个资产并用 sidecar 复核：上传成功不等于线上字节正确。
+          mkdir -p release-verify
+          gh release download "$TAG" --pattern "$ASSET" --pattern "$SIDECAR" --dir release-verify
+          ( cd release-verify && sha256sum -c "$SIDECAR" )
+
+          # 只有全部核对通过才公开；前面任何一步失败都保持 draft 并让 job 红。
+          gh release edit "$TAG" --draft=false
+
+  # 运维口径：Release 已发布后，如果只有本 job 失败，请用 Re-run failed jobs 只重跑 changelog；
+  # 整条 workflow 重跑会再次进入 release job，因「已发布，拒绝覆盖资产」按设计失败。
+  changelog:
+    name: changelog（回推 CHANGELOG 到 main）
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # 只用于把 CHANGELOG.md 提交回 main
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # 需要 tag 与完整历史，且每轮要 fetch origin/main
+
+      - name: 生成全量 CHANGELOG
+        uses: orhun/git-cliff-action@a9a95522b26fe6403f7bb24031f21fb573d0f5ff # v4.9.1
+        with:
+          config: cliff.toml
+          args: --verbose
+        env:
+          OUTPUT: CHANGELOG.md
+
+      - name: 回推 CHANGELOG 到 main（只允许该文件）
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add CHANGELOG.md
-          # 有变更才提交（首次生成 / 每次发布更新）
-          git diff --cached --quiet || git commit -m "chore: 更新 CHANGELOG 到 v${{ steps.version.outputs.version }}"
-          # tag 触发时 checkout 处于 detached HEAD，必须显式指定目标分支
-          git push origin HEAD:main
 
-      - name: 创建 Release
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ github.ref_name }}
-          name: v${{ steps.version.outputs.version }}
-          body_path: /tmp/RELEASE_BODY.md # 仅当前版本变更
-          draft: false
-          prerelease: false
+          if [ ! -s CHANGELOG.md ]; then
+            echo "::error::git-cliff 生成的 CHANGELOG.md 为空"
+            exit 1
+          fi
+          cp CHANGELOG.md "$RUNNER_TEMP/CHANGELOG.next.md"
+          git checkout -- CHANGELOG.md
+
+          for attempt in 1 2 3; do
+            echo "第 $attempt/3 次尝试回推 CHANGELOG"
+            git fetch origin main
+
+            # 每轮都重新比对：main 上的 CHANGELOG 被别人改过时拒绝覆盖，不静默丢弃对方的改动。
+            if ! git cat-file -e "$TAG:CHANGELOG.md" 2>/dev/null; then
+              echo "::error::tag $TAG 上不存在 CHANGELOG.md；Release 已发布，请手工合并"
+              exit 1
+            fi
+            if ! cmp -s <(git show "$TAG:CHANGELOG.md") <(git show origin/main:CHANGELOG.md); then
+              echo "::error::origin/main 的 CHANGELOG.md 与 tag $TAG 不同，拒绝覆盖；Release 已发布，请手工合并"
+              exit 1
+            fi
+
+            git checkout -B changelog-push origin/main >/dev/null 2>&1
+            cp "$RUNNER_TEMP/CHANGELOG.next.md" CHANGELOG.md
+
+            if git diff --quiet -- CHANGELOG.md; then
+              echo "CHANGELOG 无变化，无需回推"
+              exit 0
+            fi
+
+            git add CHANGELOG.md
+            git commit -m "chore: 更新 CHANGELOG 到 $TAG" -m "由 Release 工作流自动生成；本次回推只包含 CHANGELOG.md。"
+
+            CHANGED="$(git diff --name-only origin/main HEAD)"
+            if [ "$CHANGED" != "CHANGELOG.md" ]; then
+              echo "::error::回推包含非 CHANGELOG 文件：$CHANGED"
+              exit 1
+            fi
+
+            if git push origin HEAD:main; then
+              echo "CHANGELOG 已回推到 main"
+              exit 0
+            fi
+            echo "回推被拒绝，重新同步 origin/main 后重试"
+          done
+
+          echo "::error::Release $TAG 已发布，但 CHANGELOG 回推连续失败 3 次；请手工把本次 CHANGELOG 合并到 main"
+          exit 1

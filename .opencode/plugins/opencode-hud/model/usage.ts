@@ -20,25 +20,6 @@ export function usageFromTokens(tokens: TokenLike | undefined): UsageData | unde
   )
 }
 
-// 已加载消息窗口的 token 累加（仅作 SessionInfo 缺失时的兜底）；无任何 token 时返回 undefined
-export function aggregateUsage(messages: MessageLike[]): UsageData | undefined {
-  let input = 0
-  let output = 0
-  let reasoning = 0
-  let read = 0
-  let write = 0
-  for (const message of messages) {
-    const t = message.tokens
-    if (!t) continue
-    input += t.input ?? 0
-    output += t.output ?? 0
-    reasoning += t.reasoning ?? 0
-    read += t.cache?.read ?? 0
-    write += t.cache?.write ?? 0
-  }
-  return usageOf(input, output, reasoning, read, write)
-}
-
 // 缓存率：cc-switch 口径 = read / (input + write + read)，一位小数
 // 抽成按分量计算，供会话聚合用量与子代理的 TokenLike 共用同一口径
 export function cacheRateOf(read: number, input: number, write: number): number | undefined {
@@ -52,10 +33,26 @@ export function calcCacheRate(usage: UsageData | undefined): number | undefined 
   return cacheRateOf(usage.read, usage.input, usage.write)
 }
 
-// 上下文的实际占用：取最新一条 assistant 消息的 tokens 求和
-// （对齐内置 Context 显示口径，缓存读取是当前请求的上下文复用，不是累计）
-export function contextUsageOf(messages: MessageLike[]): number | undefined {
-  const last = messages.findLast((m) => m.tokens)
+// 上下文归属步：对齐宿主 lastAssistantWithUsage——revert 边界内、最后一次已完成 compaction 之后、
+// 最后一条带 tokens 的 assistant。边界消息未加载时返回 undefined，不猜更晚的消息。
+function contextMessageOf(messages: MessageLike[], boundary?: string): MessageLike | undefined {
+  const boundaryIndex = boundary ? messages.findIndex((message) => message.id === boundary) : -1
+  if (boundary && boundaryIndex === -1) return
+  const end = boundaryIndex === -1 ? messages.length : boundaryIndex
+
+  const compactionIndex = messages.findLastIndex(
+    (message, index) => message.type === "compaction" && message.status === "completed" && index < end,
+  )
+
+  return messages.findLast(
+    (message, index) =>
+      message.type === "assistant" && message.tokens !== undefined && index > compactionIndex && index < end,
+  )
+}
+
+// 上下文的实际占用：取上下文归属步的 tokens 求和（缓存读取是当前请求的上下文复用，不是累计）
+export function contextUsageOf(messages: MessageLike[], boundary?: string): number | undefined {
+  const last = contextMessageOf(messages, boundary)
   if (!last?.tokens) return
   const t = last.tokens
   return (
@@ -67,14 +64,26 @@ export function contextUsageOf(messages: MessageLike[]): number | undefined {
   )
 }
 
-// 上下文上限（进度条比例）：取最后一条含 model.id 的消息，在模型列表中反查 limit.context
+function nonEmpty(value: string | undefined): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined
+}
+
+// 上下文上限（进度条比例）：必须与上下文占用取自同一步，并按该步的 provider + model 匹配，
+// 避免同名的别家模型（上限可能差数倍）或刚切换、尚未写 tokens 的新步当分母。
 export function resolveContextLimit(
   messages: MessageLike[],
-  models: Array<{ id: string; limit?: { context?: number } }>,
+  models: Array<{ id: string; providerID?: string; limit?: { context?: number } }>,
+  boundary?: string,
 ): number | undefined {
-  const last = messages.findLast((m) => m.model?.id)
-  if (!last) return
-  return models.find((m) => m.id === last.model!.id)?.limit?.context
+  const last = contextMessageOf(messages, boundary)
+  const modelID = last?.model?.id
+  if (!modelID) return
+
+  const providerID = nonEmpty(last.model?.providerID) ?? nonEmpty(last.providerID)
+  const model = providerID
+    ? models.find((m) => m.providerID === providerID && m.id === modelID)
+    : models.find((m) => m.id === modelID)
+  return model?.limit?.context
 }
 
 // 上下文占用百分比（1 位小数）；limit 缺失/非正不除零

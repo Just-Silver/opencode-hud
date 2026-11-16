@@ -4,8 +4,8 @@
 
 - 仓库：<https://github.com/slkiser/opencode-quota>（MIT，TypeScript）
 - 版本：`6.2.1`；npm 发布 `@slkiser/opencode-quota`，同时提供 **server + TUI + Desktop GUI（`./gui-experimental`）+ CLI** 四个入口
-- 规模：`src/` 约 4.4 万行，`tests/` 约 5.5 万行、148 个测试文件（本仓库插件约 2.4 千行、12 个测试文件）
-- 本地路径：`E:\Code\Projects\Externals\opencode-quota`
+- 规模：`src/` 约 4.4 万行，`tests/` 约 5.5 万行、148 个测试文件（2026-11-05 调研时本仓库插件约 2.4 千行、12 个测试文件；当前规模已变化，不以此为准）
+- 本地路径：`E:\Code\Projects\Externals\opencode-quota`（2026-11-05 时的本机路径，现已不存在）
 - 查阅时间：2026-11-05（master 最新 `0854d4ab`）
 
 它比我们大一个数量级，不能整体照搬；下面只挑**能落进当前 TUI 插件**的部分，并标明与我们既有约束的冲突。
@@ -16,7 +16,7 @@
 | --- | --- | --- | --- |
 | 额度行语义 + 配速（even-use） | 行带 `window`/`resetsAt`/`percentRemaining`，算「按当前速度能否用到重置」并画 `┃` | ★★★ 用户可感知，纯函数可测 | 先决定契约形态，再做 |
 | HTTP 健壮性与错误词汇 | 统一 `requestJson`：超时/大小上限/Retry-After/脱敏/错误码 | ★★★ 修我们已知的 inFlight 卡死 | 已采纳（2026-11-05） |
-| 凭据读取 | server 侧 `ctx.integration`；只有 CLI 直读 DB，且 SQL 带 `active`/`time_updated` 排序 | ★★★ 我们仍直读 DB（SQL 已对齐） | SQL 已修（2026-11-05）；server 化另议 |
+| 凭据读取 | server 侧 `ctx.integration`；只有 CLI 直读 DB，且 SQL 带 `active`/`time_updated` 排序 | ★★★ 我们仍直读 DB（SQL 已对齐） | SQL 已修（2026-11-05；2026-11-16 决策后已改为 `time_created`，见 `AGENTS.md` 额度段）；server 化另议 |
 | 刷新/缓存策略 | 按身份分桶、失败退避、遵守 Retry-After、操作代际 | ★★☆ 避免旧账号数据/无效轮询 | 已采纳（2026-11-05） |
 | server + RPC 分层 | 四端共用 `core` + 一份 RPC 契约 | ★★☆ 我们已实测目录插件可行 | 单独写 spec |
 | 设置系统 | `settings.jsonc` 注释保留、schema 驱动、草稿预览、跨实例热更新 | ★☆☆ 我们零设置 | 只取持久化思路 |
@@ -98,13 +98,15 @@ WHERE integration_id IS NOT NULL
 ORDER BY active DESC, time_updated DESC, id DESC
 ```
 
+> 过期标注（2026-11-16）：本仓库 `quota/key.ts` 已改为 `ORDER BY active DESC, time_created DESC, id DESC`（见 `AGENTS.md` 额度段）；上面的 SQL 是对方项目原文，保留原样。
+
 解析 `type`：`key`/`api` → `key`，`oauth` → `access`；外部托管（`external`）不读。
 
-对照我们 `quota/key.ts`（2026-11-05 已修）：SQL 改为 `ORDER BY active DESC, time_updated DESC, id DESC`，只认排序后的首条；该条不可用（`external`/缺字段/JSON 坏）时不回退旧记录。`keyCache` 加 60s TTL，切号后一个心跳内就能被 store 发现。已补纯函数回归测试 `pickStoredCredentialToken`。
+对照我们 `quota/key.ts`（2026-11-05 已修）：SQL 改为 `ORDER BY active DESC, time_updated DESC, id DESC`，只认排序后的首条；该条不可用（`external`/缺字段/JSON 坏）时不回退旧记录。`keyCache` 加 60s TTL，切号后一个心跳内就能被 store 发现。已补纯函数回归测试 `pickStoredCredentialToken`（已更名/历史：现为 `decodeCredentialRow`，且不再暴露任何排序面）。（2026-11-16 决策后已改为 `time_created`，见 `AGENTS.md` 额度段。）
 
 中期若要彻底摆脱 DB schema：补 server 入口后用 `ctx.integration`，顺带获得 OAuth 刷新与凭据变更通知。这属于第 6 节的架构动作，不要零散改。
 
-对方的多账号能力（每个登录一组行、`(active)` 标记、重名编号、同一 key 挂在别名 integration 下去重）目前用不上——我们只展示当前模型的供应商。等接入真正多账号的供应商再抄 `formatCredentialDisplayNames` / `selectConnectionCredentialRows` 的思路。
+对方的多账号能力（每个登录一组行、`(active)` 标记、重名编号、同一 key 挂在别名 integration 下去重）目前用不上——**2026-11-05 时**我们只展示当前模型的供应商；2026-11-11 起已改为展示全部有凭据的已启用供应商（见 `docs/superpowers/specs/2026-11-11-multi-provider-quota-design.md`）。等接入真正多账号的供应商再抄 `formatCredentialDisplayNames` / `selectConnectionCredentialRows` 的思路。
 
 ## 5. 刷新与缓存
 
@@ -121,9 +123,9 @@ ORDER BY active DESC, time_updated DESC, id DESC
 - 缓存按凭据指纹分桶（`sha256(key)` 前 16 位）——切号后旧数据立即作废，不再等新请求成功；
 - 网络刷新最小间隔 5min；失败退避 5 → 10 → 15min，并遵守 `Retry-After`（到点先试一次，不叠加本地退避）；`force` 只绕过成功态间隔，不绕过失败退避与 `Retry-After`；
 - 每 60s 的 `QUOTA_TICK_MS` 只做「解析凭据 + 判断退避」，不发请求；`keyCache` 加 60s TTL，让切号在一个心跳内被发现；
-- 请求失败的原因存在内存 `QuotaErrorState{code,status,retryAt,message}` 里（已脱敏），不落盘、不写文件日志；侧边栏暂不展示，留给后续错误提示。
+- 请求失败的原因存在内存 `QuotaErrorState{code,status,retryAt,message}` 里（已脱敏），不落盘、不写文件日志；**2026-11-05 时**侧边栏暂不展示，留给后续错误提示。2026-11-11 HUD 5.0 起由 `quotaStatusTrail` / `quotaErrorLabel` 展示失败原因与过期前缀；2026-11-15 起加真实重试倒计时（见 `docs/superpowers/specs/2026-11-15-quota-refresh-countdown.md`）。
 
-仍未做：失败时保留「上次成功时间」并在 UI 区分新旧数据；跨进程快照/单飞。前者可随错误提示一起做。
+**2026-11-05 时仍未做**：失败时保留「上次成功时间」并在 UI 区分新旧数据；跨进程快照/单飞。前者已由 2026-11-11 HUD 5.0 的 `updatedAt` / `stale` 与 `旧` 前缀实现（见 `docs/superpowers/specs/2026-11-11-heavy-dashboard-design.md`）；跨进程快照仍未做。
 
 **不照搬**：快照文件 + 跨进程文件锁 + 合并写。那是为了 CLI/多窗口共享一次抓取；我们没有 CLI，暂时是纯成本。
 
@@ -187,7 +189,7 @@ ORDER BY active DESC, time_updated DESC, id DESC
 
 ## 11. 建议落地顺序
 
-1. ✅ **`quota/key.ts` SQL**（2026-11-05）：`ORDER BY active DESC, time_updated DESC, id DESC`，只认首条、不回退旧记录；已补回归测试。
+1. ✅ **`quota/key.ts` SQL**（2026-11-05）：`ORDER BY active DESC, time_updated DESC, id DESC`，只认首条、不回退旧记录；已补回归测试。（2026-11-16 决策后已改为 `time_created`，见 `AGENTS.md` 额度段。）
 2. ✅ **HTTP 超时与错误词汇**（2026-11-05）：新增 `shared/http.ts`（5s 超时/中止、8MB 上限、`Retry-After`、错误码、脱敏）；provider 全部接入；修掉 inFlight 永久卡死。
 3. ✅ **缓存身份与退避**（2026-11-05）：key 指纹分桶、切号即作废旧数据、5→15min 退避、遵守 `Retry-After`、60s 心跳 + 5min 网络间隔。
 4. **配速标记**：先定契约形态（推荐方案 A：`mark?: number`），移植 `pace.ts` 纯函数与单测。

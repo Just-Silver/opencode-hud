@@ -6,6 +6,7 @@ import {
   QUOTA_STALE_MS,
   QuotaStore,
   type QuotaDeps,
+  type QuotaKeyResolution,
 } from "../.opencode/plugins/opencode-hud/model/quota.ts"
 import type { QuotaData } from "../.opencode/plugins/opencode-hud/model/types.ts"
 import { QuotaRequestError } from "../.opencode/plugins/opencode-hud/shared/http.ts"
@@ -20,7 +21,7 @@ function makeDeps(overrides: Partial<QuotaDeps> = {}): QuotaDeps & {
   const logs: Array<{ level: "warn" | "error"; message: string }> = []
   return {
     apiUrlFor: (pid) => `https://example.test/${pid}/usage`,
-    resolveKey: async () => "k-test",
+    resolveKey: async () => ({ key: "k-test", identity: "id-test" }),
     fetch: async (pid, apiUrl, key) => {
       fetchCalls.push({ pid, apiUrl, key })
       return okData
@@ -41,7 +42,7 @@ test("load 成功：写缓存、返回 true、参数透传", async () => {
   assert.equal(deps.logs.length, 0)
 })
 
-test("load missing key：记 warn、不写缓存、返回 false", async () => {
+test("resolveKey 为 undefined：记 warn、不请求、不写数据", async () => {
   const deps = makeDeps({ resolveKey: async () => undefined })
   const store = new QuotaStore(deps)
   assert.equal(await store.load("opencode-go"), false)
@@ -50,7 +51,7 @@ test("load missing key：记 warn、不写缓存、返回 false", async () => {
   assert.deepEqual(deps.logs, [{ level: "warn", message: "quota opencode-go missing key" }])
 })
 
-test("没凭据：同一凭据状态下只记一次 warn，60s 心跳不刷屏", async () => {
+test("resolveKey 为 undefined：只 warn 一次（60s 心跳不刷屏）", async () => {
   let now = 1_000_000
   const deps = makeDeps({ resolveKey: async () => undefined, now: () => now })
   const store = new QuotaStore(deps)
@@ -320,11 +321,11 @@ test("429 带 Retry-After：到点前连 force 也不请求，到点后先试一
 // ─── 凭据身份：切号后旧数据立即作废 ───
 test("凭据切换：上一账号的额度立即作废，不显示到新请求成功", async () => {
   let now = 1_000_000
-  let key = "key-one"
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
   let failing = false
   const deps = makeDeps({
     now: () => now,
-    resolveKey: async () => key,
+    resolveKey: async () => resolution,
     fetch: async () => {
       if (failing) throw new Error("boom")
       return okData
@@ -335,7 +336,7 @@ test("凭据切换：上一账号的额度立即作废，不显示到新请求�
   assert.equal(await store.load("opencode-go"), true)
   assert.deepEqual(store.get("opencode-go"), okData)
 
-  key = "key-two"
+  resolution = { key: "key-two", identity: "id-two" }
   failing = true
   now += 60_000
   assert.equal(await store.load("opencode-go"), false)
@@ -345,11 +346,11 @@ test("凭据切换：上一账号的额度立即作废，不显示到新请求�
 
 test("凭据切换：重置旧凭据的退避，新凭据可立即请求", async () => {
   let now = 1_000_000
-  let key = "key-one"
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
   let failing = true
   const deps = makeDeps({
     now: () => now,
-    resolveKey: async () => key,
+    resolveKey: async () => resolution,
     fetch: async () => {
       if (failing) throw new Error("boom")
       return okData
@@ -359,12 +360,267 @@ test("凭据切换：重置旧凭据的退避，新凭据可立即请求", async
 
   assert.equal(await store.load("opencode-go"), false) // 旧凭据失败，进入 5min 退避
   now += 1_000
-  key = "key-two"
+  resolution = { key: "key-two", identity: "id-two" }
   failing = false
-  assert.equal(await store.load("opencode-go"), true) // 新指纹：不继承旧退避
+  assert.equal(await store.load("opencode-go"), true) // 新身份：不继承旧退避
+})
+
+test("同一身份、key 变化（OAuth 刷新）：数据保留，间隔内不重复请求", async () => {
+  let now = 1_000_000
+  let resolution: QuotaKeyResolution = { key: "at-1", identity: "id-stable" }
+  const deps = makeDeps({ now: () => now, resolveKey: async () => resolution })
+  const store = new QuotaStore(deps)
+
+  assert.equal(await store.load("opencode-go"), true)
+  const deadline = store.nextCheckAt("opencode-go")
+
+  // 宿主刷新了 access token：同一条 credential，身份不变
+  resolution = { key: "at-2", identity: "id-stable" }
+  now += 60_000
+  assert.equal(await store.load("opencode-go"), false)
+  assert.deepEqual(store.get("opencode-go"), okData, "刷新 token 不能让额度消失")
+  assert.equal(deps.fetchCalls.length, 1, "身份不变时仍遵守 5min 间隔")
+  assert.equal(store.nextCheckAt("opencode-go"), deadline, "刷新 token 不重置刷新截止时刻")
+
+  now = deadline!
+  assert.equal(await store.load("opencode-go"), true)
+  assert.equal(deps.fetchCalls.length, 2)
+  assert.equal(deps.fetchCalls[1]?.key, "at-2", "到点用刷新后的 key 请求")
+})
+
+test("新身份（真正换号）：旧数据立即清空，下一次 load 发请求", async () => {
+  let now = 1_000_000
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
+  const pending: Array<{ key: string; resolve: (value: QuotaData | undefined) => void }> = []
+  const deps = makeDeps({
+    now: () => now,
+    resolveKey: async () => resolution,
+    fetch: (_pid, _apiUrl, key) =>
+      new Promise<QuotaData | undefined>((resolve) => pending.push({ key, resolve })),
+  })
+  const store = new QuotaStore(deps)
+
+  const first = store.load("opencode-go")
+  await flush()
+  pending[0]?.resolve(okData)
+  assert.equal(await first, true)
+
+  resolution = { key: "key-two", identity: "id-two" }
+  now += 60_000 // 仍在旧账号的 5min 间隔内
+  const second = store.load("opencode-go")
+  await flush()
+  assert.equal(store.get("opencode-go"), undefined, "换号后旧账号数据立即作废")
+  assert.deepEqual(
+    pending.map((p) => p.key),
+    ["key-one", "key-two"],
+    "新身份不受旧账号间隔限制，下一次 load 就请求",
+  )
+
+  pending[1]?.resolve(okData)
+  assert.equal(await second, true)
+})
+
+test("resolveKey 为 null：不请求、不 warn、不写数据、不排程", async () => {
+  let now = 1_000_000
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
+  const deps = makeDeps({ now: () => now, resolveKey: async () => resolution })
+  const store = new QuotaStore(deps)
+
+  assert.equal(await store.load("opencode-go"), true)
+  assert.deepEqual(store.get("opencode-go"), okData)
+
+  // 宿主状态不明（企业 Console / DB 打不开）：有意跳过，不能拿别的账号顶替
+  resolution = null
+  now += 60_000
+  assert.equal(await store.load("opencode-go"), false)
+  assert.equal(store.get("opencode-go"), undefined, "跳过时不保留上一个账号的数据")
+  assert.equal(deps.fetchCalls.length, 1)
+  assert.deepEqual(deps.logs, [], "null 不是 missing，不刷 warn")
+  assert.equal(store.nextCheckAt("opencode-go"), undefined, "null 不排程")
+
+  now += 30 * 60_000
+  assert.equal(await store.load("opencode-go"), false)
+  assert.equal(deps.fetchCalls.length, 1, "跳过期间不请求")
+  assert.deepEqual(deps.logs, [])
+  assert.equal(store.nextCheckAt("opencode-go"), undefined)
 })
 // ─── 新鲜度状态（展示元信息，不改变刷新策略） ───
 const flush = () => new Promise((resolve) => setImmediate(resolve))
+
+// ─── 在途切号：按 identity 判定，等旧请求落定后为当前身份接续（旧结果永不写入新桶） ───
+test("在途切号按 identity 判定：旧身份结果丢弃，新身份接续一次", async () => {
+  let now = 1_000_000
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
+  const oldData: QuotaData = { items: [{ label: "5h", percent: 10 }] }
+  const newData: QuotaData = { items: [{ label: "5h", percent: 80 }] }
+  const pending: Array<{ key: string; resolve: (value: QuotaData | undefined) => void }> = []
+  const deps = makeDeps({
+    now: () => now,
+    resolveKey: async () => resolution,
+    fetch: (_pid, _apiUrl, usedKey) =>
+      new Promise<QuotaData | undefined>((resolve) => pending.push({ key: usedKey, resolve })),
+  })
+  const store = new QuotaStore(deps)
+
+  const first = store.load("opencode-go")
+  await flush()
+  assert.deepEqual(
+    pending.map((p) => p.key),
+    ["key-one"],
+  )
+
+  // 用户在旧账号请求未落定时换号
+  resolution = { key: "key-two", identity: "id-two" }
+  const second = store.load("opencode-go")
+  await flush()
+  assert.equal(store.get("opencode-go"), undefined, "换号后不能继续展示旧账号缓存")
+  assert.deepEqual(
+    pending.map((p) => p.key),
+    ["key-one"],
+    "旧请求在途时不并发第二个请求",
+  )
+
+  pending[0]?.resolve(oldData)
+  assert.equal(await first, false, "旧身份结果按 identity 丢弃")
+  await flush()
+  assert.deepEqual(
+    pending.map((p) => p.key),
+    ["key-one", "key-two"],
+    "旧请求落定后应为新身份接续请求，不依赖下一次心跳",
+  )
+  assert.equal(store.get("opencode-go"), undefined, "旧账号结果不写入新桶")
+
+  pending[1]?.resolve(newData)
+  assert.equal(await second, true)
+  assert.deepEqual(store.get("opencode-go"), newData)
+  assert.equal(store.nextCheckAt("opencode-go"), now + QUOTA_REFRESH_MS, "新账号请求成功后建立真实刷新截止")
+})
+
+test("请求在途时切号：多个等待者共享新账号的同一次请求与同一份结果", async () => {
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
+  const oldData: QuotaData = { items: [{ label: "5h", percent: 10 }] }
+  const newData: QuotaData = { items: [{ label: "5h", percent: 80 }] }
+  const wrongData: QuotaData = { items: [{ label: "5h", percent: 1 }] }
+  const pending: Array<{ key: string; resolve: (value: QuotaData | undefined) => void }> = []
+  const deps = makeDeps({
+    resolveKey: async () => resolution,
+    fetch: (_pid, _apiUrl, usedKey) =>
+      new Promise<QuotaData | undefined>((resolve) => pending.push({ key: usedKey, resolve })),
+  })
+  const store = new QuotaStore(deps)
+
+  const first = store.load("opencode-go")
+  await flush()
+  resolution = { key: "key-two", identity: "id-two" }
+  const waiters = [store.load("opencode-go"), store.load("opencode-go"), store.load("opencode-go")]
+  await flush()
+
+  pending[0]?.resolve(oldData)
+  assert.equal(await first, false)
+  await flush()
+  assert.equal(pending.length, 2, "多个等待者只应触发一次新账号请求")
+  assert.equal(pending[1]?.key, "key-two")
+
+  // 若实现重复为新账号发请求，额外请求会拿到另一份结果（而不是让测试挂起）
+  pending[1]?.resolve(newData)
+  await flush()
+  for (const extra of pending.slice(2)) extra.resolve(wrongData)
+  assert.deepEqual(await Promise.all(waiters), [true, true, true])
+  assert.deepEqual(store.get("opencode-go"), newData, "所有等待者看到同一份新账号结果")
+  assert.equal(pending.length, 2)
+})
+
+test("等待期间再次切号：以最终账号为准接续请求，不回显中间账号", async () => {
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
+  const oldData: QuotaData = { items: [{ label: "5h", percent: 10 }] }
+  const finalData: QuotaData = { items: [{ label: "5h", percent: 90 }] }
+  const pending: Array<{ key: string; resolve: (value: QuotaData | undefined) => void }> = []
+  const deps = makeDeps({
+    resolveKey: async () => resolution,
+    fetch: (_pid, _apiUrl, usedKey) =>
+      new Promise<QuotaData | undefined>((resolve) => pending.push({ key: usedKey, resolve })),
+  })
+  const store = new QuotaStore(deps)
+
+  const first = store.load("opencode-go")
+  await flush()
+  resolution = { key: "key-two", identity: "id-two" }
+  const second = store.load("opencode-go")
+  await flush()
+  // 等待旧请求期间又切到第三个账号
+  resolution = { key: "key-three", identity: "id-three" }
+
+  pending[0]?.resolve(oldData)
+  assert.equal(await first, false)
+  await flush()
+  assert.equal(pending.length, 2)
+  assert.equal(pending[1]?.key, "key-three", "按落定时的当前身份请求，不复用等待开始时解析到的过时凭据")
+  assert.equal(store.get("opencode-go"), undefined, "旧账号与中间账号的数据都不能回显")
+
+  pending[1]?.resolve(finalData)
+  assert.equal(await second, true)
+  assert.deepEqual(store.get("opencode-go"), finalData)
+})
+
+test("等待期间登出：旧请求落定后不为已失效凭据补发请求，缓存不复活", async () => {
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
+  const oldData: QuotaData = { items: [{ label: "5h", percent: 10 }] }
+  const pending: Array<{ key: string; resolve: (value: QuotaData | undefined) => void }> = []
+  const deps = makeDeps({
+    resolveKey: async () => resolution,
+    fetch: (_pid, _apiUrl, usedKey) =>
+      new Promise<QuotaData | undefined>((resolve) => pending.push({ key: usedKey, resolve })),
+  })
+  const store = new QuotaStore(deps)
+
+  const first = store.load("opencode-go")
+  await flush()
+  resolution = { key: "key-two", identity: "id-two" }
+  const second = store.load("opencode-go")
+  await flush()
+  resolution = undefined // 等待期间登出
+
+  pending[0]?.resolve(oldData)
+  assert.equal(await first, false)
+  assert.equal(await second, false)
+  assert.equal(pending.length, 1, "登出后不能为等待开始时解析到的凭据补发请求")
+  assert.equal(store.get("opencode-go"), undefined)
+  assert.equal(store.nextCheckAt("opencode-go"), undefined)
+})
+
+test("同凭据并发请求失败或空响应：等待者不绕过退避立即重发", async () => {
+  for (const outcome of ["failure", "empty"] as const) {
+    let settle: (value: QuotaData | undefined) => void = () => {}
+    let fail: (error: Error) => void = () => {}
+    let calls = 0
+    const deps = makeDeps({
+      fetch: () => {
+        calls++
+        return new Promise<QuotaData | undefined>((resolve, reject) => {
+          settle = resolve
+          fail = reject
+        })
+      },
+    })
+    const store = new QuotaStore(deps)
+
+    const first = store.load("opencode-go")
+    await flush()
+    const second = store.load("opencode-go") // 同凭据：命中并发去重
+    await flush()
+    assert.equal(calls, 1)
+
+    if (outcome === "failure") fail(new Error("boom"))
+    else settle(undefined)
+    await flush()
+    assert.equal(await first, false)
+    assert.equal(await second, false)
+
+    // 失败/空响应落定后，等待者与后续调用都要遵守 5min 退避，不能立刻重发
+    assert.equal(await store.load("opencode-go"), false)
+    assert.equal(calls, 1, `${outcome}：退避内不得重发`)
+  }
+})
 
 test("status：未请求 → empty（不猜有数据）", () => {
   const store = new QuotaStore(makeDeps())
@@ -561,11 +817,11 @@ test("nextCheckAt：没凭据 → undefined（交给凭据探测发现登录，�
 
 test("nextCheckAt：切号后不继承旧账号的退避截止时刻", async () => {
   let now = 1_000_000
-  let key = "key-one"
+  let resolution: QuotaKeyResolution = { key: "key-one", identity: "id-one" }
   let failing = true
   const deps = makeDeps({
     now: () => now,
-    resolveKey: async () => key,
+    resolveKey: async () => resolution,
     fetch: async () => {
       if (failing) throw new Error("boom")
       return okData
@@ -577,7 +833,7 @@ test("nextCheckAt：切号后不继承旧账号的退避截止时刻", async () 
   await store.load("opencode-go") // 第二次失败 → 10min 退避
   assert.equal(store.nextCheckAt("opencode-go"), now + 10 * 60_000)
 
-  key = "key-two"
+  resolution = { key: "key-two", identity: "id-two" }
   failing = false
   assert.equal(await store.load("opencode-go"), true) // 新凭据不受旧退避限制
   assert.equal(store.nextCheckAt("opencode-go"), now + QUOTA_REFRESH_MS)

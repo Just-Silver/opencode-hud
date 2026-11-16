@@ -2,7 +2,7 @@
 
 # 会话 token 口径与核对方法
 
-侧边栏「上下文」卡片的**累计用量**来自 `usageFromTokens(session().tokens)`，即宿主 `SessionInfo.tokens`（DB `session_v2` 的聚合列，覆盖整个会话）；`SessionInfo.tokens` 缺失时才退回 `aggregateUsage()` 对已加载消息求和。
+侧边栏「上下文」卡片的**累计用量**来自 `usageFromTokens(session().tokens)`，即宿主 `SessionInfo.tokens`（DB `session_v2` 的聚合列，覆盖整个会话）。**不再有 `aggregateUsage()` 分页窗口求和兜底**（2026-11-16 删除）：`SessionInfo.tokens` 缺失或全 0 时直接不显示，不用已加载消息凑数。
 
 ## 分页陷阱（2026-10-20 实测踩坑）
 
@@ -20,7 +20,7 @@
 | 总量 | `input + output + reasoning + cache.read + cache.write`，**含缓存读取**，是会话**全生命周期累计**（跨天不清零） |
 | 输入 / 输出 / 推理 / 缓存读(写) | `SessionInfo.tokens` 各分量（宿主为每条消息 `tokens` 的累计） |
 | 缓存命中率 | `read / (input + write + read)`（cc-switch 口径） |
-| 上下文 | **只看最后一条含 tokens 的消息**（最新一页必有），是当前请求的上下文占用，不是累计；与「总量」不能横向比较 |
+| 上下文 | **最后一条合资格 `assistant` 消息**的 token 和：`type === "assistant"` 且有 `tokens`，位于最后一条 `compaction`（`status === "completed"`）之后、`revert.messageID` 边界之前；compaction/user 的 tokens 不算。是当前请求的上下文占用，不是累计；与「总量」不能横向比较 |
 
 ## 各分量互斥性（2026-11-11 核对宿主源码）
 
@@ -46,8 +46,8 @@
 | 侧边栏字段 | 来源 | 完整性判据 |
 | --- | --- | --- |
 | 累计五分量（总量/输入/输出/推理/缓存读/写） | `SessionInfo.tokens`（`session_v2` 聚合列） | 权威全量；**禁止**用消息窗口求和 |
-| 上下文占用 | `message.list()` 中最后一条带 tokens 的消息 | 只取“最新一条”，最新页必含 → 窗口足够 |
-| 上下文上限 | `location.model.list(session.location)` 的 `limit.context` | 模型目录缺失 → 不显示百分比（不猜） |
+| 上下文占用 | `message.list()` 中最后一条合资格 `assistant`（`type=assistant`、有 tokens；在最后一条 completed compaction 之后、revert 边界之前） | 只取“最新一条”，最新页必含 → 窗口足够；completed compaction 之后还没有 assistant 时不显示 |
+| 上下文上限 | `location.model.list(session.location)` 中与上下文**同一条 assistant** 的模型（`providerID + id`；provider 身份缺失才 id-only）的 `limit.context` | 模型目录缺失或 provider 不匹配 → 不显示百分比（不猜） |
 | 当前供应商 ID | 最后一条带 `providerID`/`model` 的消息 | 最新语义，同上 |
 | 子代理列表 | `session.family(sessionID)` | 客户端 `listChildren` 走完全部分页（200/页）→ 全量 |
 | 子代理用量 / 耗时 / 标题 | 各子会话自己的 `SessionInfo`（`tokens`/`time`/`title`/`agent`） | 权威全量；耗时用 `time.idle` 并在 UI 侧高水位钳制 |
@@ -61,7 +61,7 @@
 2. **最新一条/当前状态** → 用消息窗口或事件即可，最新页一定包含它；
 3. **完整集合**（子代理、历史） → 必须确认分页已走完（`family()` 有；`message.list()` 没有，只能靠 `loadMore` 滚出来）。
 
-已知限制：`quota/key.ts` 的项目配置查找根是**进程 cwd**（`process.cwd()`），不是当前会话的 `location.directory`。opencode 从 A 目录启动、切到 B 目录的会话时，配置里的项目级 `providers.<id>.settings.apiKey` 覆盖可能读的是 A 的。常见路径（全局配置 / Console 登录的 DB 凭据）不受影响，故暂未改。
+已知限制：`quota/key.ts` 的项目配置查找根是**进程 cwd**（`process.cwd()`），不是当前会话的 `location.directory`。opencode 从 A 目录启动、切到 B 目录的会话时，配置里的项目级 `providers.<id>.settings.apiKey` 覆盖可能读的是 A 的。全局配置根支持 `OPENCODE_CONFIG_DIR`、显式 `OPENCODE_DB` 也按宿主规则只读（配置根见 `README.md` 安装段，显式 DB 规则见 AGENTS「额度（quota/）」），但凭据查询仍不随会话目录或服务端频道变化；常见路径（全局配置 / Console 登录的 DB 凭据）不受影响，故暂未改。
 
 ## 与宿主 DB 对账
 

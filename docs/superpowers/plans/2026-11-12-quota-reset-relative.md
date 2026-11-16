@@ -1,3 +1,5 @@
+<!-- 职责：记录 2026-11-12 额度重置提示改相对时长的实施步骤与当时验收（历史计划）；不写：当前格式化口径（见 docs/superpowers/specs/2026-11-11-quota-reset-relative-design.md 与 AGENTS.md）。 -->
+
 # 额度重置提示改为相对剩余时长 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.

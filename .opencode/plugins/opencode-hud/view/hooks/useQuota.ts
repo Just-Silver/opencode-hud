@@ -15,10 +15,10 @@ import {
   QUOTA_TICK_MS,
   toggleQuotaRowState,
 } from "../../model/quota.ts"
+import { hostDirectory, hostIntegrationID } from "../../quota/host.ts"
 import { fetchQuota, getProviderApiUrl, getProviderName, getProviderRenderer, isQuotaProvider, listProviders } from "../../quota/index.ts"
-import { resolveProviderKey } from "../../quota/key.ts"
+import { resolveProviderCredential } from "../../quota/key.ts"
 import { normID } from "../../shared/id.ts"
-import { useSecondClock } from "./useClock.ts"
 
 // 已到点的目标被再次叫醒时的最小间隔：防止「时刻没前进」时 setImmediate 式空转
 const MIN_WAKE_MS = 250
@@ -38,26 +38,32 @@ let probedHits: string[] = []
 // 额度组的展开态：模块级，跨侧边栏重建保持
 let quotaRowOpen = new Map<string, boolean>()
 
+// 每次调用都现读宿主映射：setup 重绑（切目录/换宿主实例）后立即生效，不缓存第一个组件的 context
+function resolveCredential(pid: string) {
+  return resolveProviderCredential(pid, {
+    cwd: hostDirectory(),
+    integrationID: hostIntegrationID(pid),
+  })
+}
+
 export function useQuota(opts: {
   currentPid: () => string | undefined
   subagentPids: () => string[]
 }) {
   const quota = quotaStore({
     apiUrlFor: getProviderApiUrl,
-    resolveKey: resolveProviderKey,
+    resolveKey: resolveCredential,
     fetch: fetchQuota,
     // TUI 插件无 app.log API（client 为 HTTP 客户端）；console 输出被 OpenTUI 接管到应用内面板
     log: (level, message) => {
-      if (level === "error") console.error(`[tui-usage] ${message}`)
-      else console.warn(`[tui-usage] ${message}`)
+      if (level === "error") console.error(`[opencode-hud] ${message}`)
+      else console.warn(`[opencode-hud] ${message}`)
     },
   })
 
   const [storeVer, setStoreVer] = createSignal(0)
   const [openVer, setOpenVer] = createSignal(0)
   const [available, setAvailable] = createSignal<string[]>(probedHits)
-  // 共享秒级心跳：只喂右侧倒计时文本，不进行数据构建（见下面的 rows）
-  const clock = useSecondClock()
 
   // 候选 = 本机有凭据的已启用供应商；5min TTL 只回答「有没有 token」，能否查额度交给首次请求
   const probe = async () => {
@@ -67,8 +73,9 @@ export function useQuota(opts: {
     try {
       const hits: string[] = []
       for (const { id } of listProviders()) {
-        const key = await resolveProviderKey(id).catch(() => undefined)
-        if (key) hits.push(id)
+        // null（有意跳过）与 undefined（无来源）都不算候选：没有可用凭据就不展示
+        const credential = await resolveCredential(id).catch(() => undefined)
+        if (credential) hits.push(id)
       }
       probedAt = Date.now()
       probedHits = hits
@@ -93,7 +100,7 @@ export function useQuota(opts: {
   const rows = createMemo<QuotaRow[]>(() => {
     void storeVer() // 写库通知
     void openVer() // 展开态
-    // 不读 clock：status 里带的是绝对时刻（updatedAt / nextRefreshAt），
+    // 不读时钟：status 里带的是绝对时刻（updatedAt / nextRefreshAt），
     // 逐秒变化只发生在渲染倒计时的那一个文本节点上，不重建行、不重跑 renderer。
     const currentPid = opts.currentPid()
     const now = Date.now()
@@ -180,5 +187,5 @@ export function useQuota(opts: {
     clearInterval(tickTimer)
   })
 
-  return { rows, toggle, now: clock }
+  return { rows, toggle }
 }

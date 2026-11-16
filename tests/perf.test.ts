@@ -21,6 +21,7 @@ import {
   statusGlyph,
   subagentCacheRate,
   subagentCounts,
+  subagentIdsOf,
   subagentStateOf,
   totalTokensText,
   visibleRows,
@@ -349,16 +350,40 @@ test("buildRow：把宿主 outcome 带进行状态", () => {
   assert.equal(buildRow({ ...info, outcome: "failed" }, { running: true, expanded: false, now: 6000 }).state, "running")
 })
 
-test("subagentCounts：运行中 / 已停止 / 失败各自独立，失败不藏进已停止", () => {
+test("subagentIdsOf：子会话视角不把根会话当子代理，保留兄弟与孙级", () => {
+  // family(root) 是整棵家族且含 root 自己；root 没有 parentID
+  const parentOf: Record<string, string | undefined> = {
+    root: undefined,
+    childA: "root",
+    childB: "root",
+    grandchild: "childA",
+  }
+  const family = ["root", "childA", "childB", "grandchild"]
+  const parentIDOf = (id: string) => parentOf[id]
+
+  // 根会话视角：自己的全部后代都是子代理
+  assert.deepEqual(subagentIdsOf("root", family, parentIDOf), ["childA", "childB", "grandchild"])
+  // 子会话视角：排除自己与根，兄弟和孙级保留
+  assert.deepEqual(subagentIdsOf("childA", family, parentIDOf), ["childB", "grandchild"])
+  // 孙级视角：同样不能把根当子代理
+  assert.deepEqual(subagentIdsOf("grandchild", family, parentIDOf), ["childA", "childB"])
+  assert.deepEqual(subagentIdsOf(undefined, family, parentIDOf), [])
+})
+
+test("subagentCounts：运行中 + 非失败已停止 + 失败 = 总数，失败不重复计入已停止", () => {
   const mk = (state: SubagentState): SubagentRow => ({
-    id: state + Math.random(), agent: "general", tokens: 1, running: state === "running", state, expanded: false,
+    id: state, agent: "general", tokens: 1, running: state === "running", state, expanded: false,
   })
   assert.deepEqual(subagentCounts([mk("running"), mk("failed"), mk("succeeded")]), {
     running: 1,
-    stopped: 2,
+    stopped: 1,
     failed: 1,
   })
-  // outcome 缺失/中断：只算已停止，不冒充成功
+  assert.deepEqual(subagentCounts([mk("failed"), mk("failed")]), { running: 0, stopped: 0, failed: 2 })
+  // 未知/中断/已停止都只进 stopped
   assert.deepEqual(subagentCounts([mk("stopped"), mk("interrupted")]), { running: 0, stopped: 2, failed: 0 })
+  // 模拟没有 state 的历史行：运行中回退到 running 兜底，其余计入 stopped
+  const legacy = { id: "legacy", agent: "general", tokens: 1, running: false, expanded: false } as SubagentRow
+  assert.deepEqual(subagentCounts([legacy, { ...legacy, running: true }]), { running: 1, stopped: 1, failed: 0 })
   assert.deepEqual(subagentCounts([]), { running: 0, stopped: 0, failed: 0 })
 })

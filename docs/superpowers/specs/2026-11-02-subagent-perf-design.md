@@ -4,6 +4,7 @@
 
 - 日期：2026-11-02
 - 状态：**已实现**（2026-11-02）
+- 后续变更（2026-11-16 注记）：运行中子代理也要在常驻第三行显示首字/速度，`useSubagents` 的 `perfTargets` = 已展开 ∪ 运行中，`message.sync` 也覆盖运行中条目；本文「不在主行常驻」「只在展开时 sync」等条款按此扩展。正文保留当时决策。
 - 落点：`sidebar.content` → `SubagentSection` 的展开区
 - 前提：opencode2 v2.2.5（已核对 `@opencode/plugin` 与 `@opencode/client` 源码）；不改宿主
 

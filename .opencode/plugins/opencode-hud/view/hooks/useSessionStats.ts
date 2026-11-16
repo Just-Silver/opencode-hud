@@ -5,7 +5,6 @@ import { createMemo } from "solid-js"
 import { usePlugin } from "@opencode/plugin/tui"
 import type { MessageLike, TokenLike } from "../../model/types.ts"
 import {
-  aggregateUsage,
   calcCacheRate,
   calcPercent,
   contextUsageOf,
@@ -16,8 +15,9 @@ import {
 
 // 宿主 SessionInfo 的实际字段远多于这里用到的；只声明读取的部分
 type SessionShape = {
-  location?: string
+  location?: { directory: string; workspaceID?: string }
   tokens?: TokenLike
+  revert?: { messageID?: string }
 }
 
 // sessionID 传 getter：组件体只执行一次，传值会把下游 memo 钉在首帧的会话上。
@@ -39,17 +39,18 @@ export function useSessionStats(sessionID: () => string | undefined) {
     return location ? (ctx.data.location.model.list(location) ?? []) : []
   })
 
-  // 会话累计：宿主聚合列（全量）优先，缺失时才退回已加载消息窗口（见 docs/token-accounting.md）
+  // 会话累计：只取宿主聚合列（全量）；消息窗口分页加载，禁止求和（见 docs/token-accounting.md）
   const usage = createMemo(() => {
     if (!sessionID()) return
-    return usageFromTokens(session()?.tokens) ?? aggregateUsage(messages())
+    return usageFromTokens(session()?.tokens)
   })
   const cacheRate = createMemo(() => calcCacheRate(usage()))
-  const ctxUsage = createMemo(() => (sessionID() ? contextUsageOf(messages()) : undefined))
+  const revertBoundary = createMemo(() => session()?.revert?.messageID)
+  const ctxUsage = createMemo(() => (sessionID() ? contextUsageOf(messages(), revertBoundary()) : undefined))
   const limit = createMemo(() => {
     if (!sessionID() || ctxUsage() === undefined) return
     if (!session()) return
-    return resolveContextLimit(messages(), models())
+    return resolveContextLimit(messages(), models(), revertBoundary())
   })
   const ctxPct = createMemo(() => calcPercent(ctxUsage(), limit()))
 

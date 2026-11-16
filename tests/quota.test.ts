@@ -1,5 +1,5 @@
 // ─── quota/registry.ts 白名单归一化与 fetcher 分发单元测试 ───
-// 注意：index.ts 含 import.meta.glob（node 不识别），测试一律以 createRegistry(静态注册) 驱动。
+// 注意：index.ts 含 fs 扫描与动态 import（node 测试不启动发现层），测试一律以 createRegistry(静态注册) 驱动。
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import { fileURLToPath } from "node:url"
@@ -20,7 +20,7 @@ import { resolveApiKeyFromConfig } from "../.opencode/plugins/opencode-hud/quota
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "fixtures")
 const projectDir = join(fixtures, "project")
 
-// 与 providers/opencode-go.ts 等价的静态注册（测试不动 glob，直接构造）
+// 与 providers/opencode-go.ts 等价的静态注册（测试不走发现层，直接构造）
 const opencodeGo: ProviderRegistration = {
   id: "opencode-go",
   apiUrl: QUOTA_API_URL,
@@ -36,7 +36,7 @@ test("isQuotaProvider：任意写法命中 opencode-go", () => {
   }
 })
 
-test("isQuotaProvider：无关/空 pid 不命中（含未启用供应商 command-code）", () => {
+test("isQuotaProvider：无关/空 pid 不命中（本注册表未收录 command-code）", () => {
   for (const pid of ["anthropic", "openai", "azure", "", "opencode-x", "command-code", "commandcode"]) {
     assert.equal(registry.isQuotaProvider(pid), false, `应不命中: ${pid}`)
   }

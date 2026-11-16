@@ -8,6 +8,7 @@ import { quotaStatusTrail, representativeItem } from "../model/quota.ts"
 import type { QuotaRow } from "../model/types.ts"
 import { fmtPctInt, quotaPct, quotaSummaryText, truncateVisual, visualWidth } from "../shared/format.ts"
 import { DashboardCard } from "./Card.tsx"
+import { useSecondClock } from "./hooks/useClock.ts"
 import { CARD_INNER, QUOTA_GROUP_NAME_MAX, QUOTA_INDENT } from "./layout.ts"
 import { resolveRenderer } from "./renderers/index.ts"
 import {
@@ -30,17 +31,18 @@ function trailColor(tone: "muted" | "accent" | "danger"): string {
 
 function QuotaGroup(props: {
   row: QuotaRow
-  now: () => number
   onToggle: (pid: string) => void
 }): JSX.Element {
+  // 共享秒级时钟只在这里订阅：额度组存在才有消费者，最后一个组卸载即停表。
+  // 只有「组头右端」读它（倒计时 / 重试 / 更新中），不参与行数据构建。
+  const now = useSecondClock()
   // 摘要条目只取一次：百分比取色与摘要文本共用，避免同一轮渲染重复挑选
   const item = () => representativeItem(props.row.data.items)
   const pct = () => quotaPct(item())
   const name = () => truncateVisual(props.row.name, QUOTA_GROUP_NAME_MAX)
-  // 读共享秒级时钟：只有这一处让「组头右端」逐秒变化（倒计时 / 重试 / 更新中）。
   // 拆成两个字符串 memo：文本每秒变，颜色很少变 → 颜色属性不会被秒级心跳反复重设。
-  const trailText = createMemo(() => quotaStatusTrail(props.row.status, props.row.open, props.now())?.text ?? "")
-  const trailTone = createMemo(() => quotaStatusTrail(props.row.status, props.row.open, props.now())?.tone ?? "muted")
+  const trailText = createMemo(() => quotaStatusTrail(props.row.status, props.row.open, now())?.text ?? "")
+  const trailTone = createMemo(() => quotaStatusTrail(props.row.status, props.row.open, now())?.tone ?? "muted")
   // 折叠行右端预算：内容宽 − 箭头 2 − 名称列 − 状态注记（含 1 列间隔）。
   // 用 memo 吃字符串比较：倒计时每秒变化时摘要不会跟着重算/重绘。
   const summaryText = createMemo(() => {
@@ -89,7 +91,6 @@ function QuotaGroup(props: {
 
 export function QuotaSection(props: {
   rows: QuotaRow[]
-  now: () => number
   onToggle: (pid: string) => void
 }): JSX.Element {
   return (
@@ -99,7 +100,7 @@ export function QuotaSection(props: {
         {/* 紧凑排布：组头 / 条目 / 下一组紧邻，不插空行（37 列侧栏优先信息密度） */}
         <box flexDirection="column">
           <Index each={props.rows}>
-            {(row) => <QuotaGroup row={row()} now={props.now} onToggle={props.onToggle} />}
+            {(row) => <QuotaGroup row={row()} onToggle={props.onToggle} />}
           </Index>
         </box>
       </DashboardCard>

@@ -1,41 +1,32 @@
 // ─── 更新模块：执行更新（插件内自包含，不执行任何远程脚本） ───
-// 背景：原先「下载并执行官方安装脚本」（`pwsh -Command "irm … | iex"`）会被 Windows Defender
-//   按 Trojan:Win32/Commando.A!ml 误报拦截——「下载即执行远程脚本」是典型启发式特征。
-//   故改为插件内自己下载归档 + 解压 + 原子替换，全程不执行任何远程脚本。
-//
-// 目标目录：固定「全局插件目录」（与安装脚本 install.sh / install.ps1 一致），
-//   $XDG_CONFIG_HOME/opencode/plugins/opencode-hud（默认 ~/.config/opencode/plugins/...；Windows 取 $HOME/.config）。
-//   这样在仓库目录里冒烟时不会覆盖开发副本。
-//
-// 步骤（等价于把安装脚本走一遍，只是「取源」改为 fetch 对应版本 tag 的归档）：
-//   1. fetch https://github.com/<repo>/archive/refs/tags/v<version>.tar.gz
-//   2. 写临时文件 → 系统 tar -xzf 解压（仅 spawn 本地 tar，无远程脚本执行）
-//   3. 校验归档内 .opencode/plugins/opencode-hud/tui.tsx
-//   4. 复制到目标同盘 staging → rm dest → mv stage dest（原子替换）
+// 目标目录固定为全局插件目录（与安装脚本一致），在仓库内冒烟时不会覆盖开发副本。
 // 与 update/index.ts 的「静默失败」不同：这是用户主动点更新，失败必须如实回报给弹窗。
+//
+// 顺序不可调整：先取 checksum、再下载、边下边算 hash、解压前扫描、解压后复核，最后才碰 DEST。
+// 任何一步失败都直接返回，旧版保持原样。
 import { execFile } from "child_process"
-import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "fs"
+import { cpSync, existsSync, mkdirSync, mkdtempSync, renameSync, rmSync } from "fs"
 import { tmpdir } from "os"
 import { dirname, join } from "path"
-import { globalPluginDir, LEGACY_PLUGIN_DIR_NAME } from "../shared/paths.ts"
+import { withDirLock } from "../shared/lock.ts"
+import { globalPluginDir } from "../shared/paths.ts"
+import { downloadFile, fetchText } from "./download.ts"
+import {
+  assetName,
+  assetUrl,
+  checksumUrl,
+  parseChecksum,
+  parseVersionInput,
+  RELEASE_ARCHIVE_MAX_BYTES,
+  RELEASE_CHECKSUM_MAX_BYTES,
+  RELEASE_CHECKSUM_TIMEOUT_MS,
+  RELEASE_DOWNLOAD_TIMEOUT_MS,
+} from "./release.ts"
+import { extractArgs, scanTarGz, verifyExtractedTree } from "./tar.ts"
 
-export const REPO = "Just-Silver/opencode-hud"
-export const REPO_ARCHIVE_BASE = `https://github.com/${REPO}/archive`
-export const UPDATE_RUN_TIMEOUT_MS = 120_000
-// 归档内插件所在子路径（解压剥离顶层目录后）
-export const UPDATE_PLUGIN_SUBPATH = join(".opencode", "plugins", "opencode-hud")
-// 与安装脚本一致的同盘 staging 名（固定名 + 复制前先清理，异常残留不影响下次）
-export const UPDATE_STAGE_NAME = ".tmp.opencode-hud"
-
-// 纯函数：归档 URL。有版本号 → 对应 tag 的归档（确定性）；无 → main
-export function archiveUrl(version?: string): string {
-  return version ? `${REPO_ARCHIVE_BASE}/refs/tags/v${version}.tar.gz` : `${REPO_ARCHIVE_BASE}/main.tar.gz`
-}
-
-// 纯函数：tar 解压参数（--strip-components=1 剥掉归档顶层目录）
-export function buildTarArgs(archivePath: string, destDir: string): string[] {
-  return ["-xzf", archivePath, "-C", destDir, "--strip-components=1"]
-}
+// staging/备份容器建在插件父目录内（同文件系统才能 rename）。容器里只放子目录、不含 tui.tsx，
+// 否则残留会被宿主当成第二个插件目录发现。
+const INSTALL_CONTAINER_PREFIX = ".opencode-hud-install-"
 
 // 纯函数：把命令输出裁成可读错误（优先 stderr，取末尾若干行）
 export function summarizeOutput(stdout: string, stderr: string, code: number, maxLines = 12): string {
@@ -71,83 +62,146 @@ export const execProcess: UpdateExec = (file, args, timeoutMs) =>
     })
   })
 
-// 默认下载：fetch 归档字节；任何失败 → undefined（由调用方回报）
-export async function fetchArchive(url: string, timeoutMs: number = UPDATE_RUN_TIMEOUT_MS): Promise<Uint8Array | undefined> {
-  try {
-    const res = await fetch(url, {
-      headers: { "User-Agent": "opencode-hud" },
-      signal: AbortSignal.timeout(timeoutMs),
-    })
-    if (!res.ok) return undefined
-    return new Uint8Array(await res.arrayBuffer())
-  } catch {
-    return undefined
-  }
-}
-
-// 原子替换：复制到目标同盘 staging → rm dest → mv stage dest（与安装脚本同款）
+// 事务式替换：旧目录整体挪到备份 → 新副本提到正式位置；第二步失败则把备份挪回。
+// 任何一步失败都不得删除旧版文件；安装已成功后清理失败只留下容器，不影响结果。
 export function installAtomically(srcDir: string, pluginDir: string): void {
-  mkdirSync(dirname(pluginDir), { recursive: true })
-  const stage = join(dirname(pluginDir), UPDATE_STAGE_NAME)
-  rmSync(stage, { recursive: true, force: true })
-  cpSync(srcDir, stage, { recursive: true })
-  if (!existsSync(join(stage, "tui.tsx"))) throw new Error("staging 失败：缺少 tui.tsx")
-  rmSync(pluginDir, { recursive: true, force: true })
-  renameSync(stage, pluginDir)
+  const parent = dirname(pluginDir)
+  mkdirSync(parent, { recursive: true })
+  const container = mkdtempSync(join(parent, INSTALL_CONTAINER_PREFIX))
+  const stage = join(container, "stage")
+  const backup = join(container, "backup")
+  const discardContainer = () => {
+    try {
+      rmSync(container, { recursive: true, force: true })
+    } catch {
+      // 容器内没有 tui.tsx，残留不会被宿主当成插件；留给用户手动清理
+    }
+  }
+
+  try {
+    cpSync(srcDir, stage, { recursive: true })
+    if (!existsSync(join(stage, "tui.tsx"))) throw new Error("staging 失败：缺少 tui.tsx")
+  } catch (error) {
+    discardContainer()
+    throw error
+  }
+
+  const hadOld = existsSync(pluginDir)
+  if (hadOld) {
+    try {
+      renameSync(pluginDir, backup) // 失败时旧版原封不动
+    } catch (error) {
+      discardContainer()
+      throw error
+    }
+  }
+
+  try {
+    renameSync(stage, pluginDir)
+  } catch (error) {
+    if (!hadOld) {
+      discardContainer()
+      throw error
+    }
+    try {
+      renameSync(backup, pluginDir)
+    } catch (rollbackError) {
+      // 这是唯一一份旧副本：不能删，路径必须让用户能看到
+      throw new Error(
+        `${errorMessage(error)}；旧版本已备份到 ${backup}，但恢复失败：${errorMessage(rollbackError)}`,
+      )
+    }
+    discardContainer()
+    throw error
+  }
+
+  discardContainer()
 }
 
-// 删掉改名前的旧目录。旧插件可能正被宿主加载（Windows 会锁目录），失败留给卸载/下次安装再清。
-export function removeLegacyPluginDir(pluginDir: string): void {
-  const legacy = join(dirname(pluginDir), LEGACY_PLUGIN_DIR_NAME)
-  if (legacy === pluginDir) return
-  try {
-    rmSync(legacy, { recursive: true, force: true })
-  } catch {
-    // 忽略：目录被占用时下次安装或卸载脚本清理
-  }
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
 }
 
 export type ApplyUpdateDeps = {
-  version?: string
+  version: string // 裸 X.Y.Z（UpdateInfo.latestVersion）
   pluginDir?: string // 默认全局插件目录；测试注入
   workDir?: string // 默认 mkdtemp；测试注入
-  fetchArchive?: (url: string) => Promise<Uint8Array | undefined>
+  fetch?: typeof fetch
   exec?: UpdateExec
-  timeoutMs?: number
+  timeoutMs?: number // 下载与解压超时；默认 120s
+  lockWaitMs?: number // 目录锁等待；测试注入更短的超时
 }
 
-// 执行更新：下载 → 解压 → 校验 → 原子替换；返回可读结果（注入 deps 便于离线单测）
-export async function applyUpdate(deps: ApplyUpdateDeps = {}): Promise<UpdateResult> {
-  const timeoutMs = deps.timeoutMs ?? UPDATE_RUN_TIMEOUT_MS
+// 执行更新：校验 checksum → 有界下载 → 扫描归档 → 解压 → 复核 → 事务式替换；
+// 返回可读结果，不抛异常（注入 deps 便于离线单测）
+export async function applyUpdate(deps: ApplyUpdateDeps): Promise<UpdateResult> {
+  const tag = parseVersionInput(deps.version)
+  if (!tag) {
+    return { ok: false, message: `版本号无效：只接受正式版 X.Y.Z（收到 ${JSON.stringify(deps.version)}）` }
+  }
+  const timeoutMs = deps.timeoutMs ?? RELEASE_DOWNLOAD_TIMEOUT_MS
   const pluginDir = deps.pluginDir ?? globalPluginDir()
-  const fetchArchiveImpl = deps.fetchArchive ?? ((url: string) => fetchArchive(url, timeoutMs))
   const exec = deps.exec ?? execProcess
-  const workDir = deps.workDir ?? mkdtempSync(join(tmpdir(), "opencode-hud-"))
+  let workDir = deps.workDir
 
   try {
-    const url = archiveUrl(deps.version)
-    const bytes = await fetchArchiveImpl(url)
-    if (!bytes) return { ok: false, message: `下载失败：${url}` }
+    workDir ??= mkdtempSync(join(tmpdir(), "opencode-hud-"))
 
-    const archivePath = join(workDir, "archive.tar.gz")
+    const checksum = await fetchText(checksumUrl(tag), {
+      maxBytes: RELEASE_CHECKSUM_MAX_BYTES,
+      timeoutMs: RELEASE_CHECKSUM_TIMEOUT_MS,
+      fetchImpl: deps.fetch,
+    })
+    if (!checksum.ok) return { ok: false, message: `获取校验文件失败：${checksum.message}` }
+    const expected = parseChecksum(checksum.text, assetName(tag))
+    if (!expected) return { ok: false, message: "校验文件格式错误或资产名不匹配" }
+
+    const archivePath = join(workDir, assetName(tag))
+    const download = await downloadFile(assetUrl(tag), archivePath, {
+      maxBytes: RELEASE_ARCHIVE_MAX_BYTES,
+      timeoutMs,
+      fetchImpl: deps.fetch,
+    })
+    if (!download.ok) return { ok: false, message: `下载失败：${download.message}` }
+    if (download.sha256.toLowerCase() !== expected.toLowerCase()) {
+      return { ok: false, message: "校验失败：归档 SHA256 与校验文件不一致" }
+    }
+
+    const scan = await scanTarGz(archivePath)
+    if (!scan.ok) return { ok: false, message: `归档校验失败：${scan.message}` }
+
     const extractDir = join(workDir, "extract")
     mkdirSync(extractDir, { recursive: true })
-    writeFileSync(archivePath, bytes)
-
-    const tar = await exec("tar", buildTarArgs(archivePath, extractDir), timeoutMs)
+    const tar = await exec("tar", extractArgs(archivePath, extractDir), timeoutMs)
     if (tar.spawnError === "ENOENT") return { ok: false, message: "未找到命令：tar（系统需自带 tar）" }
     if (tar.spawnError === "TIMEOUT") return { ok: false, message: `解压超时（${Math.round(timeoutMs / 1000)}s）` }
     if (tar.code !== 0) return { ok: false, message: summarizeOutput(tar.stdout, tar.stderr, tar.code) }
 
-    const srcDir = join(extractDir, UPDATE_PLUGIN_SUBPATH)
-    if (!existsSync(join(srcDir, "tui.tsx"))) return { ok: false, message: "归档中未找到插件入口 tui.tsx" }
+    const tree = verifyExtractedTree(extractDir)
+    if (!tree.ok) return { ok: false, message: tree.message }
 
-    installAtomically(srcDir, pluginDir)
-    removeLegacyPluginDir(pluginDir)
+    // 下载/校验/解压都在锁外；只有重命名事务需要互斥
+    await withDirLock(
+      {
+        pluginsDir: dirname(pluginDir),
+        tool: "update",
+        waitMs: deps.lockWaitMs,
+        onWarn: (message) => console.warn(`[opencode-hud] ${message}`),
+      },
+      () => {
+        installAtomically(extractDir, pluginDir)
+      },
+    )
     return { ok: true }
   } catch (error) {
-    return { ok: false, message: error instanceof Error ? error.message : String(error) }
+    return { ok: false, message: errorMessage(error) }
   } finally {
-    rmSync(workDir, { recursive: true, force: true })
+    if (workDir) {
+      try {
+        rmSync(workDir, { recursive: true, force: true })
+      } catch {
+        // 清理失败不改变已确定的更新结果（Windows 上归档可能正被杀软扫描）
+      }
+    }
   }
 }

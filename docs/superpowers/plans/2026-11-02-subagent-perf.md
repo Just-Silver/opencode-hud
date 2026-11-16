@@ -1,3 +1,5 @@
+<!-- 职责：记录 2026-11-02 子代理展开行首字/速度的实施步骤与当时验收（历史计划）；不写：当前实现口径（见 docs/design-subagent-section.md 与审计报告）。 -->
+
 # 子代理展开行首字 / 速度 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
