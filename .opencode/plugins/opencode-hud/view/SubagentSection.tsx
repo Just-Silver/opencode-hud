@@ -113,7 +113,7 @@ function StoppedRow(props: { row: SubagentRow; onToggle: () => void }): JSX.Elem
   )
 }
 
-// 卡片头：左「● N 运行中  N 已停止  N 失败」/ 右「合计 X」（各取所需，不合并语义）。
+// 卡片头：左「● N ● N ● N」（灯色表状态）/ 右「合计 X」（各取所需，不合并语义）。
 // 计数区可收缩（flexShrink + minWidth 0）：33 列塞不下时先裁计数，右端信息始终可见。
 function Counts(props: {
   counts: { running: number; stopped: number; failed: number }
@@ -125,12 +125,13 @@ function Counts(props: {
   return (
     <box flexDirection="row" height={1}>
       <box flexDirection="row" flexShrink={1} minWidth={0}>
-        {/* 运行中 / 已停止常驻，0 也显示：全停与全跑必须在计数行一眼能区分 */}
-        <text fg={SUCCESS_COLOR} wrapMode="none">{`● ${props.counts.running} 运行中`}</text>
+        {/* 只有灯与数字，状态由灯色承载：绿=运行中、黄=已停止、红=失败。
+            运行中 / 已停止常驻，0 也显示：全停与全跑必须在计数行一眼能区分 */}
+        <text fg={SUCCESS_COLOR} wrapMode="none">{`● ${props.counts.running}`}</text>
         <text> </text>
-        <text fg={WARNING_COLOR} wrapMode="none">{`${props.counts.stopped} 已停止`}</text>
+        <text fg={WARNING_COLOR} wrapMode="none">{`● ${props.counts.stopped}`}</text>
         <Show when={props.counts.failed > 0}>
-          <text fg={ERROR_COLOR} wrapMode="none">{`  ${props.counts.failed} 失败`}</text>
+          <text fg={ERROR_COLOR} wrapMode="none">{`  ● ${props.counts.failed}`}</text>
         </Show>
       </box>
       <box flexGrow={1} />
