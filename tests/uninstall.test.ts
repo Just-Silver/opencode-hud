@@ -41,6 +41,9 @@ rm() {
 
 const PWSH_WRAPPER = `
 $ErrorActionPreference = "Stop"
+# Windows CI 的控制台代码页会把中文输出变成 ?，断言按 utf8 读回时失败
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
 
 function Remove-Item {
   [CmdletBinding()]

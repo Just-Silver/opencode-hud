@@ -109,6 +109,11 @@ function assertNoOutput(outDir: string): void {
   assert.equal(existsSync(join(outDir, checksumAssetName(TAG))), false, "失败时不应留下 sidecar")
 }
 
+// chmod -R a-w 之后目录不可写，POSIX 上 rmSync 会 EACCES；删前把副本与产物恢复可写
+function makeWritable(dir: string): void {
+  spawnSync("bash", ["-c", 'chmod -R u+rwX "$1"', "probe", posix(dir)], { windowsHide: true })
+}
+
 // ─── 用例 ───
 
 test("同一源目录两次构建字节一致，sidecar 可被 parseChecksum 解析", { skip: NEED_GNU_TAR }, () => {
@@ -148,6 +153,7 @@ test("同一源目录两次构建字节一致，sidecar 可被 parseChecksum 解
       "默认源目录与改过 mode 的副本必须字节一致",
     )
   } finally {
+    makeWritable(root)
     rmSync(root, { recursive: true, force: true })
   }
 })

@@ -43,23 +43,35 @@ export type UpdateRunResult = {
   spawnError?: "ENOENT" | "TIMEOUT"
 }
 
-export type UpdateExec = (file: string, args: string[], timeoutMs: number) => Promise<UpdateRunResult>
+// cwd 用于 tar：Git 自带的 GNU tar 会把 "C:\..." 当成远程主机（exit 128），
+// 所以归档路径与 -C 目标一律传相对名，由 cwd 定位。
+export type UpdateExec = (
+  file: string,
+  args: string[],
+  timeoutMs: number,
+  opts?: { cwd?: string },
+) => Promise<UpdateRunResult>
 
 export type UpdateResult = { ok: true } | { ok: false; message: string }
 
 // 默认执行器：node:child_process 异步执行（不阻塞 TUI 线程）
-export const execProcess: UpdateExec = (file, args, timeoutMs) =>
+export const execProcess: UpdateExec = (file, args, timeoutMs, opts) =>
   new Promise((resolve) => {
-    execFile(file, args, { timeout: timeoutMs, windowsHide: true, maxBuffer: 1_000_000 }, (error, stdout, stderr) => {
-      const out = String(stdout ?? "")
-      const err = String(stderr ?? "")
-      if (!error) return resolve({ code: 0, stdout: out, stderr: err })
-      const raw = error as { code?: unknown; killed?: boolean }
-      if (raw.killed) return resolve({ code: -1, stdout: out, stderr: err, spawnError: "TIMEOUT" })
-      const code = typeof raw.code === "number" ? raw.code : 1
-      const spawnError = raw.code === "ENOENT" ? "ENOENT" : undefined
-      resolve({ code, stdout: out, stderr: err, spawnError })
-    })
+    execFile(
+      file,
+      args,
+      { timeout: timeoutMs, windowsHide: true, maxBuffer: 1_000_000, cwd: opts?.cwd },
+      (error, stdout, stderr) => {
+        const out = String(stdout ?? "")
+        const err = String(stderr ?? "")
+        if (!error) return resolve({ code: 0, stdout: out, stderr: err })
+        const raw = error as { code?: unknown; killed?: boolean }
+        if (raw.killed) return resolve({ code: -1, stdout: out, stderr: err, spawnError: "TIMEOUT" })
+        const code = typeof raw.code === "number" ? raw.code : 1
+        const spawnError = raw.code === "ENOENT" ? "ENOENT" : undefined
+        resolve({ code, stdout: out, stderr: err, spawnError })
+      },
+    )
   })
 
 // 事务式替换：旧目录整体挪到备份 → 新副本提到正式位置；第二步失败则把备份挪回。
@@ -156,7 +168,8 @@ export async function applyUpdate(deps: ApplyUpdateDeps): Promise<UpdateResult> 
     const expected = parseChecksum(checksum.text, assetName(tag))
     if (!expected) return { ok: false, message: "校验文件格式错误或资产名不匹配" }
 
-    const archivePath = join(workDir, assetName(tag))
+    const archiveName = assetName(tag)
+    const archivePath = join(workDir, archiveName)
     const download = await downloadFile(assetUrl(tag), archivePath, {
       maxBytes: RELEASE_ARCHIVE_MAX_BYTES,
       timeoutMs,
@@ -172,7 +185,8 @@ export async function applyUpdate(deps: ApplyUpdateDeps): Promise<UpdateResult> 
 
     const extractDir = join(workDir, "extract")
     mkdirSync(extractDir, { recursive: true })
-    const tar = await exec("tar", extractArgs(archivePath, extractDir), timeoutMs)
+    // 相对名 + cwd：GNU tar 见到盘符会当成远程主机
+    const tar = await exec("tar", extractArgs(archiveName, "extract"), timeoutMs, { cwd: workDir })
     if (tar.spawnError === "ENOENT") return { ok: false, message: "未找到命令：tar（系统需自带 tar）" }
     if (tar.spawnError === "TIMEOUT") return { ok: false, message: `解压超时（${Math.round(timeoutMs / 1000)}s）` }
     if (tar.code !== 0) return { ok: false, message: summarizeOutput(tar.stdout, tar.stderr, tar.code) }

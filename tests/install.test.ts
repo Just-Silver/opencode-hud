@@ -145,6 +145,9 @@ rm() {
 
 const PWSH_WRAPPER = `
 $ErrorActionPreference = "Stop"
+# Windows CI 的控制台代码页会把中文输出变成 ?，断言按 utf8 读回时失败
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+$OutputEncoding = [Console]::OutputEncoding
 
 # 让脚本的「curl.exe 不存在」分支可达；其余调用原样委托
 function Get-Command {
@@ -219,6 +222,16 @@ function git {
 
 function tar {
   if ($env:FAKE_TAR_MARKER) { Add-Content -LiteralPath $env:FAKE_TAR_MARKER -Value 'tar' -NoNewline }
+  # 复现 Git 自带 GNU tar 的行为：带盘符的参数会被当成远程主机
+  if ($env:FAKE_TAR_REJECT_DRIVE -eq '1') {
+    foreach ($arg in $args) {
+      if ("$arg" -match '^[A-Za-z]:') {
+        [Console]::Error.WriteLine("tar: Cannot connect to $($Matches[0]) resolve failed")
+        $global:LASTEXITCODE = 128
+        return
+      }
+    }
+  }
   # Windows 是可执行文件 tar.exe，Linux 是 tar；两种都要能找到
   $exe = @(Get-Command tar.exe -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1
   if (-not $exe) { $exe = @(Get-Command tar -CommandType Application -ErrorAction SilentlyContinue) | Select-Object -First 1 }
@@ -428,7 +441,9 @@ for (const shell of SHELLS) {
   test(`${shell.name}：受控资产安装成功，新版本生效、旧文件消失、无锁/身份标记残留`, { skip: shell.skip }, () => {
     const layout = seedLayout()
     try {
-      const { code, output } = shell.run(layout, releaseFixtures(layout))
+      // 证明传给 tar 的是相对路径：假 tar 对任何带盘符的参数退 128
+      const driveGuard = shell.name === "install.ps1" ? { FAKE_TAR_REJECT_DRIVE: "1" } : {}
+      const { code, output } = shell.run(layout, { ...releaseFixtures(layout), ...driveGuard })
       assert.equal(code, 0, output)
       assertNewInstalled(layout.dest)
       assertNoLock(layout.pluginsDir)

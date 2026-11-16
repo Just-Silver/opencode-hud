@@ -6,7 +6,7 @@ import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSy
 import { syncBuiltinESMExports } from "node:module"
 import { Readable } from "node:stream"
 import { tmpdir } from "os"
-import { dirname, join } from "path"
+import { dirname, isAbsolute, join } from "path"
 import {
   applyUpdate,
   installAtomically,
@@ -22,12 +22,14 @@ const VERSION = "9.9.9"
 
 const ok = (): UpdateRunResult => ({ code: 0, stdout: "", stderr: "" })
 
-// 假 tar：--strip-components=1 已剥离 opencode-hud/，入口直接落在 -C 目标根
+// 假 tar：--strip-components=1 已剥离 opencode-hud/，入口直接落在 -C 目标根。
+// 生产代码以 cwd + 相对路径调用，所以相对目标要按 opts.cwd 解析。
 function fakeExtract(content: string): UpdateExec {
-  return async (_file, args) => {
+  return async (_file, args, _timeout, opts) => {
     const dest = args[args.indexOf("-C") + 1]
-    mkdirSync(dest, { recursive: true })
-    writeFileSync(join(dest, "tui.tsx"), content)
+    const target = opts?.cwd ? join(opts.cwd, dest) : dest
+    mkdirSync(target, { recursive: true })
+    writeFileSync(join(target, "tui.tsx"), content)
     return ok()
   }
 }
@@ -317,17 +319,30 @@ test("成功：校验并扫描通过后才事务替换，资产 URL 带 v 前缀
   const pluginDir = makePluginDir(root, "old")
   try {
     const server = releaseServer(validArchive())
+    const extractCalls: Array<{ args: string[]; cwd?: string }> = []
+    const exec: UpdateExec = async (file, args, timeoutMs, opts) => {
+      extractCalls.push({ args, cwd: opts?.cwd })
+      return fakeExtract("new")(file, args, timeoutMs, opts)
+    }
     const result = await applyUpdate({
       version: VERSION,
       pluginDir,
       workDir: work,
       fetch: server.fetchImpl,
-      exec: fakeExtract("new"),
+      exec,
     })
     assert.deepEqual(result, { ok: true })
     assert.ok(server.calls.includes(assetUrl(TAG)), server.calls.join("\n"))
     assert.equal(readFileSync(join(pluginDir, "tui.tsx"), "utf8"), "new")
     assert.equal(existsSync(work), false) // 临时目录已清理
+    // GNU tar 在 Windows 会把盘符当远程主机：解压参数只能是相对名，路径由 cwd 定位
+    assert.equal(extractCalls.length, 1)
+    assert.equal(extractCalls[0].cwd, work)
+    for (const arg of extractCalls[0].args) {
+      assert.doesNotMatch(arg, /^[A-Za-z]:/, `tar 参数不能带盘符：${arg}`)
+      assert.equal(isAbsolute(arg), false, `tar 参数不能是绝对路径：${arg}`)
+    }
+    assert.equal(extractCalls[0].args[extractCalls[0].args.indexOf("-C") + 1], "extract")
   } finally {
     rmSync(root, { recursive: true, force: true })
     rmSync(work, { recursive: true, force: true })

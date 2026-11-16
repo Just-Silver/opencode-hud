@@ -363,8 +363,20 @@ try {
 
   $extract = Join-Path $tmp "extract"
   New-Item -ItemType Directory -Path $extract -Force | Out-Null
-  & tar -xf $raw -C $extract --strip-components=1 --no-same-owner 2>&1 | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "解压失败（exit $LASTEXITCODE；现有版本未改动）" }
+  # Git 自带的 GNU tar 会把 "C:\..." 当成远程主机（exit 128），所以只在 $tmp 内用相对名调用
+  $tarOutput = ""
+  Push-Location $tmp
+  try {
+    $tarOutput = (& tar -xf (Split-Path -Leaf $raw) -C "extract" --strip-components=1 --no-same-owner 2>&1 | Out-String)
+    $tarCode = $LASTEXITCODE
+  } finally {
+    Pop-Location
+  }
+  if ($tarCode -ne 0) {
+    $detail = "$tarOutput".Trim()
+    if ($detail) { $detail = "：$detail" }
+    throw "解压失败（exit $tarCode；现有版本未改动）$detail"
+  }
   Test-ExtractedTree -Root $extract
 
   # ─── 从这里开始才碰 dest：先取锁，再重新检查目标 ───
