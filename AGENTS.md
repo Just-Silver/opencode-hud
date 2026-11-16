@@ -46,12 +46,13 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 # Solid / UI 硬约束
 
 - **组件函数体只执行一次**：禁止 `const x = props.x` 这类 props 快照；取值放 JSX 表达式，或用惰性 getter（`const pct = () => quotaPct(props.item)`）。额度不显示、上下文进度条不刷新都踩过这个坑。
+- **ViewModel 入参传 getter、不传值**（`useSessionStats(() => props.sessionID)`）：hook 在组件体创建时只跑一次，传值等于把会话钉在首帧；slot 的 `render` 回调同样不要解构 props（`render: (props) => <Sidebar sessionID={props.sessionID} />`）。
 - 周期性重算的行列表用 `<Index>`（子代理区块）；`<For>` 按引用比较会销毁重建整行，清掉用户选中/滚动。数据只在数据源变化时更新的列表（如 `bars` 的 items）可以用 `<For>`。
 - **秒级心跳只喂单个文本节点**：`view/hooks/useClock.ts` 是唯一秒级时钟（引用计数，最后一个消费者卸载即停），倒计时/年龄用「绝对时刻 − now」现算；`rows()` 不许读时钟，否则每秒重建全部额度行、重跑供应商 renderer。
 - **宿主侧栏为 42 列，本插件可用 37 列**（`42 − 宿主 padding 4 − scrollbox 预留 1`，见 `packages/tui/src/routes/session/sidebar.tsx`）。卡片一圈圆角边框（2 列）+ 左右内边距（2 列）→ 内容 **33 列**；所有几何常量只在 `view/layout.ts` 定义，**不要用 `onSizeChange` 实测**（首帧为 0，会让标题在两种截断宽度间闪）。
 - 视觉分层两种底色：`CARD_COLOR`（HUD 连续表面 + 卡片底）→ `RAISED_COLOR`（指标块/运行中任务）。卡片之间的空行也用 `CARD_COLOR`，不要露更暗的间隙（会有「断层」感）。区块用 `DashboardCard`：**一卡一圈 `borderStyle="rounded"` 边框 + 边框内标题（box `title`）**，不要再叠第二层边框/分隔线，也不要在卡片下垫色块。
 - 卡片**不做整卡折叠**（折叠后只剩空边框）；区块内折叠（额度分组、子代理详情与历史段）保留。
-- 配色只从 `view/theme.ts` 取（OpenCode Native Pro，固定暗色，不跟随 `ctx.theme`）。琥珀是强调色，给品牌元素与上下文主指标；绿色表示「运行中 / 成功 / 低占用」，但**同一区块内「正在跑」与「已跑完」不能同色**（子代理区块：运行中绿、已停止黄、失败红；计数 0 也显示）；红色只给真实错误与 ≥85%。上下文主指标用 `contextColor`（琥珀，≥85 转红），额度「已用占比」用 `usageColor`（低=绿、≥50 橙、≥85 红）。token 分量色：输入蓝 / 输出紫 / 缓存青绿 / 推理琥珀。
+- 配色只从 `view/theme.ts` 取（OpenCode Native Pro，固定暗色，不跟随 `ctx.theme`）。琥珀是强调色，给品牌元素与上下文主指标；绿色表示「运行中 / 成功 / 低占用」，但**同一区块内「正在跑」与「已跑完」不能同色**（子代理区块：运行中绿、已停止黄、失败红；计数 0 也显示）；红色只给真实错误与 ≥85%。上下文主指标用 `contextColor`（琥珀，≥85 转红），额度「已用占比」用 `usageColor`（低=绿、≥50 橙、≥85 红）。token 分量色：输入蓝 / 输出紫 / 缓存青绿 / 推理琥珀。状态胶囊的三种暗底（`*_WASH_COLOR`）只用于小面积状态块，不做大面积铺色。
 - 整个 HUD 由 `Sidebar` 的 `hasContent()` 门控（用量 / 额度 / 子代理 / 更新提示全无时整块不渲染）；三块内容各自独立门控，**额度不得嵌在「有会话用量」里**（新会话还没有 token 时，已登录订阅照样要能看）。更新检查在 `view/hooks/useUpdate.ts`，进程内只跑一次 Promise，横幅随 `hasContent()` 一起卸载也不丢状态。
 - 无数据区块整块不渲染（额度为空、供应商不支持、无子代理），不要显示“不支持/无数据”占位。
 - 进度条 0% 不渲染填充块：OpenTUI 里 `flexGrow=0` 的 box 仍占 1 格，`ColorBar` 用 `Show when={pct > 0}` 门控。
@@ -78,7 +79,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - 会话累计 token 取 `SessionInfo.tokens`（`usageFromTokens`）；**不能**对 `session.message.list()` 求和——宿主分页加载，未滚动的历史不在列表里。上下文占用取最新 assistant 消息的 token 和。
 - 性能（首字/速度）只算每个**已完成**的 assistant 步：速度守卫为 `time.streamed − firstContentStart ≥ 200ms` 且净生成 `≥ 300ms`，**无速度上限**；生成中沿用上一步的值。无实时估算、滑窗、滤波或定时器。改速度逻辑前先读 `docs/design-performance-footer.md`。
 - 子代理默认只读 `session.family()` 与 `SessionInfo` 聚合列；**展开时或运行中**按需 `message.sync(id)` 读子会话消息算首字 / 速度（运行中条目要在常驻第三行显示），不轮询、不持久化。耗时用 `(time.idle ?? time.updated) − time.created`，并用高水位钳住（步骤边界的旧 `idle` 会回跳）。**排序：running 优先 → 已完成按结束时刻（`idle ?? updated ?? created`）倒序**；默认只常驻最近 5 条已完成（`VISIBLE_DONE_ROWS`），其余折叠成 `还有 N 条已完成` 一行，running 不设上限（复用的老子代理会凭状态自动回到常驻区）。缓存率与会话区块共用 `cacheRateOf`。
-- **结局取 `SessionInfo.outcome`**（宿主在 `session.execution.succeeded/failed/interrupted` 时写 `idle_outcome`，见 `packages/core/src/session/projector.ts` 的 `projectIdle`）：只在 `running === false` 时采信（运行中它仍是上一轮的旧值），缺失才降级为「已停止」。**禁止用 `running=false` 推断成功**。卡片头用 `subagentCounts` 给三个独立计数：运行中 / 已停止 / 失败（只显示灯色 + 数字，不写文字标签）。
+- **结局取 `SessionInfo.outcome`**（宿主在 `session.execution.succeeded/failed/interrupted` 时写 `idle_outcome`，见 `packages/core/src/session/projector.ts` 的 `projectIdle`）：只在 `running === false` 时采信（运行中它仍是上一轮的旧值），缺失才降级为「已停止」。**禁止用 `running=false` 推断成功**。卡片头用 `subagentCounts` 给三个独立计数：运行中 / 已停止 / 失败（三个状态胶囊，灯 + 状态色数字、不写文字标签；数字 3 位、合计 6 位定宽右对齐，见 `AGENT_COUNT_NUM_WIDTH` / `AGENT_TOTAL_WIDTH`）。
 
 # 更新与发版
 
