@@ -31,13 +31,17 @@ test("parseJson：纯 JSON / JSONC 注释尾逗号 / 无效文本", () => {
 })
 
 // ─── format ───
-test("fmtTokens：千分/百万缩写", () => {
+test("fmtTokens：千分/百万/十亿缩写", () => {
   assert.equal(fmtTokens(123), "123")
   assert.equal(fmtTokens(123600), "123.6k")
   assert.equal(fmtTokens(200000), "200k")
   assert.equal(fmtTokens(2840000), "2.8M")
   assert.equal(fmtTokens(999949), "999.9k")
   assert.equal(fmtTokens(999999), "1M")
+  assert.equal(fmtTokens(1200000000), "1.2B")
+  assert.equal(fmtTokens(2500000000), "2.5B")
+  assert.equal(fmtTokens(999949000), "999.9M")
+  assert.equal(fmtTokens(999999999), "1B")
   assert.equal(fmtTokens(Number.NaN), "")
   assert.equal(trimZero("200.0"), "200")
 })

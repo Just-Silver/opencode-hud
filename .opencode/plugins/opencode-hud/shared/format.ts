@@ -1,13 +1,18 @@
 // ─── 共享/帮助函数：展示格式化（纯函数，全层可引用） ───
 import type { QuotaItem } from "../model/types.ts"
 
-// token 数：123.6k / 200k / 28.4k
+// token 数：123.6k / 200k / 28.4k / 2.5B
 export function fmtTokens(v: number): string {
   if (!Number.isFinite(v)) return ""
-  if (v >= 1_000_000) return trimZero((v / 1_000_000).toFixed(1)) + "M"
+  if (v >= 1_000_000_000) return trimZero((v / 1_000_000_000).toFixed(1)) + "B"
+  if (v >= 1_000_000) {
+    const m = trimZero((v / 1_000_000).toFixed(1))
+    // 999,950,000 起一位小数会进位成 "1000M"，降格显示不如直接进到 B
+    return m === "1000" ? "1B" : m + "M"
+  }
   if (v >= 1000) {
     const k = trimZero((v / 1000).toFixed(1))
-    // 999,950 起一位小数会进位成 "1000k"，降格显示不如直接进到 M
+    // 同理：999,950 起会进位成 "1000k"，直接进到 M
     return k === "1000" ? "1M" : k + "k"
   }
   return String(v)
