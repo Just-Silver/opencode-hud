@@ -20,33 +20,42 @@ type SessionShape = {
   tokens?: TokenLike
 }
 
-export function useSessionStats(sessionID: string | undefined) {
+// sessionID 传 getter：组件体只执行一次，传值会把下游 memo 钉在首帧的会话上。
+export function useSessionStats(sessionID: () => string | undefined) {
   const ctx = usePlugin()
 
-  const messages = () => (sessionID ? (ctx.data.session.message.list(sessionID) ?? []) : [])
-  const session = () => (sessionID ? (ctx.data.session.get(sessionID) as SessionShape | undefined) : undefined)
-  const models = () => {
+  // 一轮重算里有多个指标要读同一份列表：message.list / location.model.list 每次都走宿主投影，
+  // 不 memo 化会在 usage、上下文、限额、供应商四处各取一遍。
+  const messages = createMemo<MessageLike[]>(() => {
+    const id = sessionID()
+    return id ? ((ctx.data.session.message.list(id) ?? []) as MessageLike[]) : []
+  })
+  const session = createMemo(() => {
+    const id = sessionID()
+    return id ? (ctx.data.session.get(id) as SessionShape | undefined) : undefined
+  })
+  const models = createMemo(() => {
     const location = session()?.location
     return location ? (ctx.data.location.model.list(location) ?? []) : []
-  }
+  })
 
   // 会话累计：宿主聚合列（全量）优先，缺失时才退回已加载消息窗口（见 docs/token-accounting.md）
   const usage = createMemo(() => {
-    if (!sessionID) return
-    return usageFromTokens(session()?.tokens) ?? aggregateUsage(messages() as MessageLike[])
+    if (!sessionID()) return
+    return usageFromTokens(session()?.tokens) ?? aggregateUsage(messages())
   })
   const cacheRate = createMemo(() => calcCacheRate(usage()))
-  const ctxUsage = createMemo(() => (sessionID ? contextUsageOf(messages() as MessageLike[]) : undefined))
+  const ctxUsage = createMemo(() => (sessionID() ? contextUsageOf(messages()) : undefined))
   const limit = createMemo(() => {
-    if (!sessionID || ctxUsage() === undefined) return
+    if (!sessionID() || ctxUsage() === undefined) return
     if (!session()) return
-    return resolveContextLimit(messages() as MessageLike[], models())
+    return resolveContextLimit(messages(), models())
   })
   const ctxPct = createMemo(() => calcPercent(ctxUsage(), limit()))
 
   const providerID = createMemo(() => {
-    if (!sessionID) return
-    return resolveProviderID(messages() as MessageLike[], (id) => models().find((m) => m.id === id)?.providerID)
+    if (!sessionID()) return
+    return resolveProviderID(messages(), (id) => models().find((m) => m.id === id)?.providerID)
   })
 
   return { usage, cacheRate, ctxUsage, limit, ctxPct, providerID }

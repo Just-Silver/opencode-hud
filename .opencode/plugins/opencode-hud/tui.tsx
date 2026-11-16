@@ -9,7 +9,8 @@ export default Plugin.define({
   setup(context) {
     context.ui.slot({
       append: "sidebar.content",
-      render: ({ sessionID }: { sessionID?: string }) => <Sidebar sessionID={sessionID} />,
+      // 不解构 props：解构会丢掉宿主的响应式 getter，会话切换后仍是旧 sessionID
+      render: (props: { sessionID?: string }) => <Sidebar sessionID={props.sessionID} />,
     })
     // 性能块落在输入框下方状态行（目录路径之后、宿主 usage 之前）
     context.ui.slot({

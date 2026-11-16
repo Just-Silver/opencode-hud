@@ -15,10 +15,9 @@ import { useSubagents } from "./hooks/useSubagents.ts"
 import { useUpdate } from "./hooks/useUpdate.ts"
 
 export function Sidebar(props: { sessionID?: string }): JSX.Element {
-  const sessionID = props.sessionID
-
-  const stats = useSessionStats(sessionID)
-  const agents = useSubagents(sessionID)
+  // 传 getter 而不是值：组件体只执行一次，快照会把 ViewModel 钉在首帧的会话上
+  const stats = useSessionStats(() => props.sessionID)
+  const agents = useSubagents(() => props.sessionID)
   const quota = useQuota({
     currentPid: stats.providerID,
     subagentPids: agents.activeProviderIDs,

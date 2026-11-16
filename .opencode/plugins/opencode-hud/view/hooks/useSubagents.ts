@@ -7,7 +7,8 @@ import type { PerfMessage, SubagentInfo } from "../../model/types.ts"
 import { latestPerf } from "../../model/perf.ts"
 import { buildRow, runningProviderIDs, sortRows, SPINNER_INTERVAL_MS, type SubagentRow } from "../../model/subagent.ts"
 
-export function useSubagents(sessionID: string | undefined) {
+// sessionID 传 getter：组件体只执行一次，传值会把 family/content 钉在首帧的会话上。
+export function useSubagents(sessionID: () => string | undefined) {
   const ctx = usePlugin()
 
   // 逐条展开态：组件级（侧边栏随会话重建，展开态不跨会话复用）
@@ -16,23 +17,31 @@ export function useSubagents(sessionID: string | undefined) {
 
   // family() 已包含全部子会话（只增不减），去掉自身
   const subagentIds = createMemo<string[]>(() => {
-    if (!sessionID) return []
-    const family = ctx.data.session.family(sessionID) ?? []
-    return family.filter((id: string) => id !== sessionID)
+    const id = sessionID()
+    if (!id) return []
+    const family = ctx.data.session.family(id) ?? []
+    return family.filter((other: string) => other !== id)
   })
+
+  // 运行中的 id 集合：perfTargets 与 rows 共用，避免同一轮为同一个 id 查两次 status
+  const runningIds = createMemo<string[]>(
+    () => {
+      void subTick()
+      return subagentIds().filter((id) => ctx.data.session.status(id) === "running")
+    },
+    undefined,
+    { equals: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]) },
+  )
+  const runningSet = createMemo(() => new Set(runningIds()))
 
   // 需要读子会话消息的条目：已展开的 ∪ 运行中的。
   // 运行中条目要在常驻行显示首字/速度，所以不能只按展开态取消息。
   // 逐秒重算，但内容相等时复用上一轮数组引用，避免下游 perf/effect 每秒重跑一边。
   const perfTargets = createMemo<string[]>(
     () => {
-      void subTick()
       const state = expanded()
-      const out: string[] = []
-      for (const id of subagentIds()) {
-        if (state[id] === true || ctx.data.session.status(id) === "running") out.push(id)
-      }
-      return out
+      const running = runningSet()
+      return subagentIds().filter((id) => state[id] === true || running.has(id))
     },
     undefined,
     { equals: (a, b) => a.length === b.length && a.every((v, i) => v === b[i]) },
@@ -62,13 +71,14 @@ export function useSubagents(sessionID: string | undefined) {
     const now = Date.now()
     const state = expanded()
     const perf = subagentPerf()
+    const running = runningSet()
     const list: SubagentRow[] = []
     for (const id of subagentIds()) {
       const info = ctx.data.session.get(id) as SubagentInfo | undefined
       if (!info) continue
       list.push(
         buildRow(info, {
-          running: ctx.data.session.status(id) === "running",
+          running: running.has(id),
           expanded: state[id] === true,
           now,
           prevElapsed: elapsedHigh.get(id),
