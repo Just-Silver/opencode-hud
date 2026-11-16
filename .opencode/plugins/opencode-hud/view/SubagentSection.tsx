@@ -7,10 +7,12 @@
 /** @jsxImportSource @opentui/solid */
 import { createMemo, createSignal, Index, Show, type JSX } from "solid-js"
 import {
+  AGENT_COUNT_NUM_WIDTH,
   AGENT_ELAPSED_WIDTH,
   AGENT_RUNNING_TITLE_MAX,
   AGENT_TITLE_MAX,
   AGENT_TOKENS_WIDTH,
+  AGENT_TOTAL_WIDTH,
 } from "./layout.ts"
 import {
   headingOf,
@@ -26,13 +28,16 @@ import { DashboardCard } from "./Card.tsx"
 import { TaskInspector } from "./TaskInspector.tsx"
 import {
   ERROR_COLOR,
+  ERROR_WASH_COLOR,
   MUTED_COLOR,
   RAISED_COLOR,
   SECONDARY_COLOR,
   SECTION_SUBAGENT_TITLE,
   SUCCESS_COLOR,
+  SUCCESS_WASH_COLOR,
   TEXT_COLOR,
   WARNING_COLOR,
+  WARNING_WASH_COLOR,
 } from "./theme.ts"
 
 // 状态色（v3.1.0 约定）：运行中 = 绿，已停止 = 黄；失败仍红（红色只给真实错误）。
@@ -113,7 +118,30 @@ function StoppedRow(props: { row: SubagentRow; onToggle: () => void }): JSX.Elem
   )
 }
 
-// 卡片头：左「● N ● N ● N」（灯色表状态）/ 右「合计 X」（各取所需，不合并语义）。
+// 状态胶囊：终端没有圆角/胶囊原语，胶囊 = 底色块 + 右侧 1 列留白（宿主 StatusBadge 同法）。
+// 灯在胶囊内、数字紧随其后；左侧不留白是宽度取舍——33 列要同时放下三个胶囊与合计。
+type CapsuleTone = { fg: string; bg: string }
+
+function capsuleTone(state: "running" | "stopped" | "failed"): CapsuleTone {
+  switch (state) {
+    case "running":
+      return { fg: SUCCESS_COLOR, bg: SUCCESS_WASH_COLOR }
+    case "failed":
+      return { fg: ERROR_COLOR, bg: ERROR_WASH_COLOR }
+    case "stopped":
+      return { fg: WARNING_COLOR, bg: WARNING_WASH_COLOR }
+  }
+}
+
+function StateCapsule(props: { state: "running" | "stopped" | "failed"; value: number }): JSX.Element {
+  return (
+    <text bg={capsuleTone(props.state).bg} fg={capsuleTone(props.state).fg} wrapMode="none">
+      {`● ${padStartVisual(String(props.value), AGENT_COUNT_NUM_WIDTH)} `}
+    </text>
+  )
+}
+
+// 卡片头：左「三个状态胶囊」/ 右「合计 X」（各取所需，不合并语义）。
 // 计数区可收缩（flexShrink + minWidth 0）：33 列塞不下时先裁计数，右端信息始终可见。
 function Counts(props: {
   counts: { running: number; stopped: number; failed: number }
@@ -125,13 +153,14 @@ function Counts(props: {
   return (
     <box flexDirection="row" height={1}>
       <box flexDirection="row" flexShrink={1} minWidth={0}>
-        {/* 只有灯与数字，状态由灯色承载：绿=运行中、黄=已停止、红=失败。
+        {/* 胶囊之间留 1 列卡片底色：三块各自成块，宽度不随个位→百位变化。
             运行中 / 已停止常驻，0 也显示：全停与全跑必须在计数行一眼能区分 */}
-        <text fg={SUCCESS_COLOR} wrapMode="none">{`● ${props.counts.running}`}</text>
+        <StateCapsule state="running" value={props.counts.running} />
         <text> </text>
-        <text fg={WARNING_COLOR} wrapMode="none">{`● ${props.counts.stopped}`}</text>
+        <StateCapsule state="stopped" value={props.counts.stopped} />
         <Show when={props.counts.failed > 0}>
-          <text fg={ERROR_COLOR} wrapMode="none">{`  ● ${props.counts.failed}`}</text>
+          <text> </text>
+          <StateCapsule state="failed" value={props.counts.failed} />
         </Show>
       </box>
       <box flexGrow={1} />
@@ -143,7 +172,10 @@ function Counts(props: {
           <Show when={props.total}>
             <text fg={MUTED_COLOR} wrapMode="none">合计</text>
             <text> </text>
-            <text fg={SECONDARY_COLOR} wrapMode="none">{props.total}</text>
+            {/* 定宽右对齐：数值从 1.2M 涨到 390.8M 时「合计」两字不左移 */}
+            <text fg={SECONDARY_COLOR} wrapMode="none">
+              {padStartVisual(props.total ?? "", AGENT_TOTAL_WIDTH)}
+            </text>
           </Show>
         }
       >

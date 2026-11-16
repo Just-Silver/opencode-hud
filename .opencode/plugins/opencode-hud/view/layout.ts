@@ -32,6 +32,12 @@ export const AGENT_RUNNING_TITLE_MAX = AGENT_RUNNING_INNER - 2 - 2
 // 展开详情（Task Inspector）：左右内边距 2 / 1；运行中卡片内宽 30 → 版心 27（按较窄的一侧排版）
 export const AGENT_INSPECTOR_INNER = AGENT_RUNNING_INNER - 3
 
+// 卡片头计数胶囊：底色块 + 左右各 1 列留白 → 每组 2 + 数字列宽
+// 3 位是实测需要（长会话的子代理累计已过 200），不是预留；数字右对齐，破千只多 1 列
+export const AGENT_COUNT_NUM_WIDTH = 3
+// 卡片头合计值：「999.9M」最长 6 列；定宽后「合计」不会随 token 增长左移
+export const AGENT_TOTAL_WIDTH = 6
+
 // ── 额度组 ──
 export const QUOTA_INDENT = 2
 export const QUOTA_GROUP_NAME_MAX = 14

@@ -4,12 +4,14 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
+  AGENT_COUNT_NUM_WIDTH,
   AGENT_INSPECTOR_INNER,
   AGENT_TITLE_MAX,
+  AGENT_TOTAL_WIDTH,
   CARD_INNER,
   QUOTA_GROUP_NAME_MAX,
 } from "../.opencode/plugins/opencode-hud/view/layout.ts"
-import { visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
+import { padStartVisual, visualWidth } from "../.opencode/plugins/opencode-hud/shared/format.ts"
 
 // 与 TwoCol 的布局一致：左列 paddingRight 1 → 至少 1 列间隔
 function fits(left: string, right: string): boolean {
@@ -32,4 +34,14 @@ test("额度组头：箭头 + 名称列 + 状态注记（倒计时/重试）在�
   for (const trail of cases) {
     assert.ok(headerWidth(trail) <= CARD_INNER, `组头超宽（${headerWidth(trail)} > ${CARD_INNER}）：${trail}`)
   }
+})
+
+// 卡片头（三个状态胶囊 + 合计）必须一行放下：超宽会被 flexShrink 裁掉计数，而不是换行。
+// 取最坏值：三个胶囊都是 999、合计是最长的 999.9M（失败为 0 时只有两个胶囊，已被覆盖）。
+test("子代理卡片头：三个胶囊与合计在最坏值下仍同行", () => {
+  const capsule = (n: number) => `● ${padStartVisual(String(n), AGENT_COUNT_NUM_WIDTH)} `
+  const left = [capsule(999), capsule(999), capsule(999)].join(" ")
+  const right = "合计" + " " + padStartVisual("999.9M", AGENT_TOTAL_WIDTH)
+  const used = visualWidth(left) + 1 + visualWidth(right)
+  assert.ok(used <= CARD_INNER, `卡片头占 ${used} 列，超出卡片内容 ${CARD_INNER} 列`)
 })

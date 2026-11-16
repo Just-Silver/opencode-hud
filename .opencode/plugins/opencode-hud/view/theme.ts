@@ -24,6 +24,11 @@ export const CACHE_COLOR = "#65BFA6" // token 缓存分量
 export const SUCCESS_COLOR = "#86C89A" // 运行中 / 成功 / 低占用
 export const WARNING_COLOR = "#E5A05A" // 已停止 / 中断 / 中风险（≥50%）
 export const ERROR_COLOR = "#E06C75" // 真实错误 / 高风险
+// 状态胶囊底（子代理计数）：状态色 20% 混入卡片底，只用于小面积状态块。
+// 再暗就与卡片底不可分（块感消失），再亮会跟琥珀标题抢注意力。
+export const SUCCESS_WASH_COLOR = "#2F3C33"
+export const WARNING_WASH_COLOR = "#423426"
+export const ERROR_WASH_COLOR = "#412A2B"
 
 // 区块标题（TUI 展示文案，用中文）
 export const SECTION_CONTEXT_TITLE = "上下文"
