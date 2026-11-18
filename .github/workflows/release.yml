@@ -90,19 +90,6 @@ jobs:
         env:
           OUTPUT: release-body.md
 
-      # 版本相关的升级须知（例如旧版内置更新器无法自我修复）必须写在 Release 正文里，
-      # 又不能污染长期文档；按 tag 命名的文件存在才追加，缺失即跳过。
-      - name: 前置该版本的升级须知（存在才生效）
-        run: |
-          set -euo pipefail
-          NOTES="docs/release-notes/$GITHUB_REF_NAME.md"
-          if [ ! -f "$NOTES" ]; then
-            echo "没有 $NOTES，跳过"
-            exit 0
-          fi
-          cat "$NOTES" release-body.md > release-body.merged.md
-          mv release-body.merged.md release-body.md
-
       - name: 上传资产到 draft Release（公开态拒绝覆盖）
         env:
           GH_TOKEN: ${{ github.token }}
