@@ -3,6 +3,16 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [5.4.1](https://github.com/Just-Silver/opencode-hud/compare/v5.4.0...v5.4.1) - 2026-11-18
+
+
+### CI
+
+- **release** 按 tag 前置版本级升级须知
+
+### 修复
+
+- **update** Windows 宿主持有插件目录句柄时改用复制备份替换
 ## [5.4.0](https://github.com/Just-Silver/opencode-hud/compare/v5.3.0...v5.4.0) - 2026-11-18
 
 
