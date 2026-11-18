@@ -3,6 +3,12 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [5.4.0](https://github.com/Just-Silver/opencode-hud/compare/v5.3.0...v5.4.0) - 2026-11-18
+
+
+### 新功能
+
+- **subagent** 运行中卡片补充 agent/模型/供应商与缓存率
 ## [5.3.0](https://github.com/Just-Silver/opencode-hud/compare/v5.2.0...v5.3.0) - 2026-11-16
 
 
