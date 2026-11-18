@@ -93,10 +93,11 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - **Release 已发布后若只有 changelog job 失败，用 Re-run failed jobs 只重跑它**；整条 workflow 重跑会再次进入 release job，因公开态按设计失败。安装/更新/卸载共用目录锁、资产校验与旧名目录的手工清理，见「插件加载与安装」。
 - 更新检查走 `github.com/<repo>/releases/latest` 的 302 `Location`，**不要改 `api.github.com`**（未认证限流 60 次/小时，部分网络直接 403）。节流：成功 TTL 24h / 失败冷却 1h / 超时 8s；缓存写到 `pluginDataDir()/update-check.json`。
 - 一键更新是插件自包含：取 `.sha256` → 有界下载 → 解压前扫描归档头（与安装脚本同一套规则）→ 目录锁内原子替换 `globalPluginDir()`；任何校验失败都不触碰现有安装，也不回退源码归档/`git clone`/`main`。**不要改回“下载并执行安装脚本”**：`irm ... | iex` 会被 Windows Defender 判为 `Trojan:Win32/Commando.A!ml`。`child_process` 只用于本地 `tar`（120s 超时、`windowsHide`）。
+- **Windows 上不能只靠重命名插件目录完成替换**：宿主热重载会为本插件每个源文件的父目录（含 `view/hooks`、`quota/providers` 这类后代目录）开 `fs.watch`，句柄覆盖整棵子树时旧目录和它的顶层条目都无法重命名，只会返回 `EPERM`；复制与删除不受影响。`installAtomically` 先试整体重命名，只有 `EPERM`/`EBUSY`/`EACCES` 才降级为「整树复制到备份容器 → 删除旧目录 → staging 落位」，任何一步失败都用备份恢复；其他 errno 直接失败。`tests/update-apply.test.ts` 必须保留真实 `fs.watch`（含嵌套目录）的回归用例——没有句柄时 rename 在 CI 上永远成功，会把这条路径测成绿的。
 
 # 文档地图
 
-- `README.md` — 用户的安装 / 更新 / 卸载。
+- `README.md` — 用户的安装 / 更新 / 卸载（面向用户的使用说明；不记录版本变化、迁移历史、内部校验实现与供应链细节）。
 - `docs/config-install.md` — 配置安装方式与 TUI 插件的双 Solid 陷阱（本插件不采用，供其他插件复用）。
 - `docs/token-accounting.md` — 会话 token 口径、数据来源与 DB 对账。
 - `docs/design-performance-footer.md` — 首字/速度口径、守卫与 footer 布局；改速度逻辑前必读。

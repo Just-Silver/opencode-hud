@@ -74,6 +74,55 @@ export const execProcess: UpdateExec = (file, args, timeoutMs, opts) =>
     )
   })
 
+// 宿主把占用的错误码报成 EPERM / EBUSY / EACCES 都可能（Windows 共享冲突与权限拒绝）
+const LOCKED_ERRNOS = new Set(["EPERM", "EBUSY", "EACCES"])
+
+function isLockedError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return typeof code === "string" && LOCKED_ERRNOS.has(code)
+}
+
+// Windows 降级替换：宿主热重载为本插件每个源文件的父目录开 fs.watch，且覆盖
+// view/hooks、quota/providers 这类后代目录——这些句柄让旧目录、乃至它的顶层条目
+// 都无法重命名（EPERM），但复制与删除不受影响。所以先整树复制到备份容器（旧版
+// 此时未被触碰），再删除旧目录、把 staging 提升到正式位置；任何一步失败都用备份恢复。
+// 返回 undefined 表示替换成功；否则给出错误与「旧版是否已经恢复」。
+function replaceByCopy(
+  pluginDir: string,
+  stage: string,
+  backup: string,
+): { error: unknown; oldRestored: boolean } | undefined {
+  try {
+    cpSync(pluginDir, backup, { recursive: true })
+  } catch (error) {
+    // 备份没做成：旧版一个字节都没动，容器里的半份备份随容器丢弃
+    return { error, oldRestored: true }
+  }
+
+  const restore = (): string | undefined => {
+    try {
+      rmSync(pluginDir, { recursive: true, force: true })
+      cpSync(backup, pluginDir, { recursive: true })
+      return undefined
+    } catch (error) {
+      return errorMessage(error)
+    }
+  }
+
+  try {
+    rmSync(pluginDir, { recursive: true, force: true })
+    renameSync(stage, pluginDir)
+  } catch (error) {
+    const failure = restore()
+    if (!failure) return { error, oldRestored: true }
+    return {
+      error: new Error(`${errorMessage(error)}；旧版本已备份到 ${backup}，但恢复失败：${failure}`),
+      oldRestored: false,
+    }
+  }
+  return undefined
+}
+
 // 事务式替换：旧目录整体挪到备份 → 新副本提到正式位置；第二步失败则把备份挪回。
 // 任何一步失败都不得删除旧版文件；安装已成功后清理失败只留下容器，不影响结果。
 export function installAtomically(srcDir: string, pluginDir: string): void {
@@ -103,8 +152,17 @@ export function installAtomically(srcDir: string, pluginDir: string): void {
     try {
       renameSync(pluginDir, backup) // 失败时旧版原封不动
     } catch (error) {
-      discardContainer()
-      throw error
+      if (!isLockedError(error)) {
+        discardContainer()
+        throw error
+      }
+      const outcome = replaceByCopy(pluginDir, stage, backup)
+      if (!outcome) {
+        discardContainer()
+        return
+      }
+      if (outcome.oldRestored) discardContainer()
+      throw outcome.error
     }
   }
 

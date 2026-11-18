@@ -370,7 +370,10 @@ test("先校验后下载：第一个请求是 .sha256，之后才请求资产归
   }
 })
 
-test("applyUpdate：旧目录无法挪走时失败，旧版文件保持完整", async () => {
+// 宿主 TUI 热重载会为本插件每个源文件的父目录开 fs.watch（view/、model/ …）。
+// Windows 上这些子目录句柄让「重命名插件目录」返回 EPERM（句柄允许删除与重命名
+// 自身，但拒绝父目录改名），更新必须降级为逐条目搬迁而不是直接失败。
+test("applyUpdate：宿主占用插件子目录（父目录 rename EPERM）时降级完成替换", async () => {
   const root = mkdtempSync(join(tmpdir(), "otu-root-"))
   const work = mkdtempSync(join(tmpdir(), "otu-work-"))
   const pluginDir = makePluginDir(root, "old")
@@ -378,9 +381,84 @@ test("applyUpdate：旧目录无法挪走时失败，旧版文件保持完整", 
   writeFileSync(join(pluginDir, "a.ts"), "old-a")
   writeFileSync(join(pluginDir, "sub", "deep.ts"), "old-deep")
   const realRename = fs.renameSync
+  const locked = (message: string) => Object.assign(new Error(message), { code: "EPERM" })
   try {
     injectFs("renameSync", (src: string, dest: string) => {
-      if (String(src) === pluginDir) throw new Error("EPERM: simulated 旧目录被占用")
+      if (String(src) === pluginDir) throw locked("EPERM: simulated 旧目录被占用")
+      return realRename(src, dest)
+    })
+    const result = await applyUpdate({
+      version: VERSION,
+      pluginDir,
+      workDir: work,
+      fetch: releaseServer(validArchive()).fetchImpl,
+      exec: fakeExtract("new"),
+    })
+    assert.deepEqual(result, { ok: true })
+    assert.equal(readFileSync(join(pluginDir, "tui.tsx"), "utf8"), "new")
+    assert.equal(existsSync(join(pluginDir, "a.ts")), false, "旧版独有文件不能残留")
+    assert.equal(existsSync(join(pluginDir, "sub")), false, "旧版独有目录不能残留")
+    assert.deepEqual(discoverableDirs(dirname(pluginDir), pluginDir), [])
+  } finally {
+    restoreFs()
+    rmSync(root, { recursive: true, force: true })
+    rmSync(work, { recursive: true, force: true })
+  }
+})
+
+// 真实句柄而非模拟：Windows 上宿主 watcher 覆盖后代目录（quota/providers、view/hooks），
+// 会走降级路径；其他平台走整体 rename。两者都要求成功。
+test("installAtomically：子目录被 fs.watch 占用时仍完成整目录替换", () => {
+  const root = mkdtempSync(join(tmpdir(), "otu-root-"))
+  const nested = ["view/hooks", "quota/providers", "model"]
+  const src = join(root, "src")
+  for (const dir of nested) mkdirSync(join(src, dir), { recursive: true })
+  writeFileSync(join(src, "tui.tsx"), "new")
+  writeFileSync(join(src, "view/hooks/useQuota.ts"), "new-hook")
+  writeFileSync(join(src, "quota/providers/openai.ts"), "new-provider")
+  const pluginDir = join(root, "plugins", "opencode-hud")
+  for (const dir of nested) mkdirSync(join(pluginDir, dir), { recursive: true })
+  writeFileSync(join(pluginDir, "tui.tsx"), "old")
+  writeFileSync(join(pluginDir, "view/hooks/useQuota.ts"), "old-hook")
+  writeFileSync(join(pluginDir, "quota/providers/openai.ts"), "old-provider")
+  writeFileSync(join(pluginDir, "quota/providers/legacy.ts"), "old-only")
+  const watchers = [
+    pluginDir,
+    ...nested.map((dir) => join(pluginDir, dir)),
+  ].map((dir) => fs.watch(dir, () => {}))
+  watchers.forEach((watcher) => watcher.on("error", () => {}))
+  try {
+    assert.doesNotThrow(() => installAtomically(src, pluginDir))
+    assert.equal(readFileSync(join(pluginDir, "tui.tsx"), "utf8"), "new")
+    assert.equal(readFileSync(join(pluginDir, "view/hooks/useQuota.ts"), "utf8"), "new-hook")
+    assert.equal(readFileSync(join(pluginDir, "quota/providers/openai.ts"), "utf8"), "new-provider")
+    assert.equal(existsSync(join(pluginDir, "quota/providers/legacy.ts")), false, "旧版独有文件不能残留")
+    assert.deepEqual(discoverableDirs(dirname(pluginDir), pluginDir), [])
+    assert.deepEqual(
+      readdirSync(dirname(pluginDir)).filter((name) => name.startsWith(".opencode-hud-install-")),
+      [],
+      "成功后不能留下事务容器",
+    )
+  } finally {
+    for (const watcher of watchers) watcher.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+// 降级路径的失败面：新副本落位失败时必须把搬走的旧条目原样搬回
+test("applyUpdate：降级替换时新副本落位失败，旧版完整恢复", async () => {
+  const root = mkdtempSync(join(tmpdir(), "otu-root-"))
+  const work = mkdtempSync(join(tmpdir(), "otu-work-"))
+  const pluginDir = makePluginDir(root, "old")
+  mkdirSync(join(pluginDir, "sub"), { recursive: true })
+  writeFileSync(join(pluginDir, "a.ts"), "old-a")
+  writeFileSync(join(pluginDir, "sub", "deep.ts"), "old-deep")
+  const realRename = fs.renameSync
+  const locked = (message: string) => Object.assign(new Error(message), { code: "EPERM" })
+  try {
+    injectFs("renameSync", (src: string, dest: string) => {
+      if (String(src) === pluginDir) throw locked("EPERM: simulated 旧目录被占用")
+      if (String(dest) === pluginDir) throw locked("EPERM: simulated 提升失败")
       return realRename(src, dest)
     })
     const result = await applyUpdate({
@@ -391,9 +469,11 @@ test("applyUpdate：旧目录无法挪走时失败，旧版文件保持完整", 
       exec: fakeExtract("new"),
     })
     assert.equal(result.ok, false)
+    if (!result.ok) assert.ok(result.message.includes("提升失败"), result.message)
     assert.equal(readFileSync(join(pluginDir, "tui.tsx"), "utf8"), "old")
     assert.equal(readFileSync(join(pluginDir, "a.ts"), "utf8"), "old-a")
     assert.equal(readFileSync(join(pluginDir, "sub", "deep.ts"), "utf8"), "old-deep")
+    assert.deepEqual(discoverableDirs(dirname(pluginDir), pluginDir), [])
   } finally {
     restoreFs()
     rmSync(root, { recursive: true, force: true })
@@ -480,7 +560,7 @@ test("applyUpdate：安装成功但清理临时目录失败时仍返回成功", 
   }
 })
 
-test("applyUpdate：安装失败时保留安装错误，不被清理异常覆盖", async () => {
+test("applyUpdate：非共享冲突类安装错误不做降级，旧版文件保持完整", async () => {
   const root = mkdtempSync(join(tmpdir(), "otu-root-"))
   const work = mkdtempSync(join(tmpdir(), "otu-work-"))
   const pluginDir = makePluginDir(root, "old")
@@ -488,7 +568,7 @@ test("applyUpdate：安装失败时保留安装错误，不被清理异常覆盖
   const realRm = fs.rmSync
   try {
     injectFs("renameSync", (src: string, dest: string) => {
-      if (String(src) === pluginDir) throw new Error("EPERM: simulated 旧目录被占用")
+      if (String(src) === pluginDir) throw Object.assign(new Error("EIO: simulated 旧目录不可读"), { code: "EIO" })
       return realRename(src, dest)
     })
     injectFs("rmSync", (path: string, ...rest: any[]) => {
@@ -504,7 +584,7 @@ test("applyUpdate：安装失败时保留安装错误，不被清理异常覆盖
     })
     assert.equal(result.ok, false)
     if (!result.ok) {
-      assert.ok(result.message.includes("旧目录被占用"), result.message)
+      assert.ok(result.message.includes("旧目录不可读"), result.message)
       assert.ok(!result.message.includes("清理失败"), result.message)
     }
   } finally {
@@ -644,13 +724,11 @@ test("成功与失败都只释放自己的锁", async () => {
     assert.equal(readFileSync(join(lockDir, "owner"), "utf8"), "tool=uninstall\npid=7\nstartedAt=1\ntoken=foreign\n")
     rmSync(lockDir, { recursive: true, force: true })
 
-    // 自己拿锁后事务失败：只释放自己的锁
-    const realRename = fs.renameSync
+    // 自己拿锁后事务失败：只释放自己的锁（整条 rename 链都失败时降级也救不回来）
     const work2 = mkdtempSync(join(tmpdir(), "otu-work-"))
     try {
-      injectFs("renameSync", (src: string, dest: string) => {
-        if (String(src) === pluginDir) throw new Error("EPERM: simulated 旧目录被占用")
-        return realRename(src, dest)
+      injectFs("renameSync", () => {
+        throw Object.assign(new Error("EPERM: simulated 目录被占用"), { code: "EPERM" })
       })
       const failed = await applyUpdate({
         version: VERSION,
@@ -701,11 +779,9 @@ test("预先存在的陌生事务容器不被清理", async () => {
     assert.deepEqual(result, { ok: true })
     assert.equal(readFileSync(join(stranger, "backup", "tui.tsx"), "utf8"), "only-backup")
 
-    const realRename = fs.renameSync
     try {
-      injectFs("renameSync", (src: string, dest: string) => {
-        if (String(src) === pluginDir) throw new Error("EPERM: simulated 旧目录被占用")
-        return realRename(src, dest)
+      injectFs("renameSync", () => {
+        throw Object.assign(new Error("EPERM: simulated 目录被占用"), { code: "EPERM" })
       })
       const failed = await applyUpdate({
         version: VERSION,
