@@ -9,6 +9,7 @@ import { createMemo, createSignal, Index, Show, type JSX } from "solid-js"
 import {
   AGENT_COUNT_NUM_WIDTH,
   AGENT_ELAPSED_WIDTH,
+  AGENT_RUNNING_INNER,
   AGENT_RUNNING_TITLE_MAX,
   AGENT_TITLE_MAX,
   AGENT_TOKENS_WIDTH,
@@ -23,10 +24,11 @@ import {
   type SubagentRow,
   type SubagentState,
 } from "../model/subagent.ts"
-import { fmtElapsed, fmtPerf, fmtTokens, padStartVisual, truncateVisual } from "../shared/format.ts"
+import { fmtElapsed, fmtPerf, fmtPct, fmtSec, fmtTokens, fmtTpsText, padStartVisual, truncateVisual, visualWidth } from "../shared/format.ts"
 import { DashboardCard } from "./Card.tsx"
 import { TaskInspector } from "./TaskInspector.tsx"
 import {
+  CACHE_COLOR,
   ERROR_COLOR,
   ERROR_WASH_COLOR,
   MUTED_COLOR,
@@ -55,7 +57,41 @@ export function stateColor(state: SubagentState): string {
   }
 }
 
-// 运行中：抬升底色的三行任务卡（标题 / 耗时·消耗 / 首字·速度），左侧绿色强调线
+// 常驻双列：左列吃剩余宽度（不换行，超出截断），右列贴右缘。
+// 先算右列宽度再截左列，避免 30 列内左右撞在一起；中间空白由 flexGrow 吸收。
+function TwoCol(props: {
+  left: string
+  leftColor: string
+  right?: string
+  rightColor?: string
+  rightLabel?: string
+}): JSX.Element {
+  const rightWidth = () =>
+    props.right ? visualWidth(props.right) + (props.rightLabel ? visualWidth(props.rightLabel) + 1 : 0) : 0
+  const left = () => truncateVisual(props.left, AGENT_RUNNING_INNER - rightWidth() - (rightWidth() > 0 ? 1 : 0))
+  return (
+    <box flexDirection="row" height={1}>
+      <text fg={props.leftColor} wrapMode="none">
+        {left()}
+      </text>
+      <box flexGrow={1} />
+      <Show when={props.rightLabel}>
+        <text fg={MUTED_COLOR} wrapMode="none">
+          {props.rightLabel + " "}
+        </text>
+      </Show>
+      <Show when={props.right}>
+        <text fg={props.rightColor ?? SECONDARY_COLOR} wrapMode="none">
+          {props.right}
+        </text>
+      </Show>
+    </box>
+  )
+}
+
+// 运行中：抬升底色的五行任务卡（标题 / Agent·供应商 / 模型·强度 / 耗时·消耗·缓存 / 首字·速度），
+// 左侧绿色强调线。展开只是把标题从截断换成全文（按字符换行），其余行不变，不另渲染详情。
+// 模型/供应商名取宿主目录的显示名，左列按 30 列预算截断。
 function RunningRow(props: { row: SubagentRow; frame: number; onToggle: () => void }): JSX.Element {
   return (
     <box
@@ -66,29 +102,57 @@ function RunningRow(props: { row: SubagentRow; frame: number; onToggle: () => vo
       paddingLeft={1}
       paddingRight={1}
     >
-      <box flexDirection="row" height={1} onMouseDown={props.onToggle}>
+      <box
+        flexDirection="row"
+        alignItems="flex-start"
+        height={props.row.expanded ? undefined : 1}
+        onMouseDown={props.onToggle}
+      >
         <text fg={stateColor("running")}>{statusGlyph(true, props.frame) + " "}</text>
-        <text fg={TEXT_COLOR} wrapMode="none">
-          <b>{truncateVisual(headingOf(props.row), AGENT_RUNNING_TITLE_MAX)}</b>
-        </text>
-        <box flexGrow={1} />
+        <box flexGrow={1} minWidth={0}>
+          <text fg={TEXT_COLOR} wrapMode={props.row.expanded ? "char" : "none"}>
+            <b>
+              {props.row.expanded
+                ? headingOf(props.row)
+                : truncateVisual(headingOf(props.row), AGENT_RUNNING_TITLE_MAX)}
+            </b>
+          </text>
+        </box>
         <text fg={MUTED_COLOR}>{props.row.expanded ? "▾" : "▸"}</text>
       </box>
-      <box flexDirection="row" height={1} onMouseDown={props.onToggle}>
-        <text fg={SECONDARY_COLOR} wrapMode="none">
-          {`${fmtElapsed(props.row.elapsedMs)} · ${fmtTokens(props.row.tokens)}`}
-        </text>
-      </box>
+      <TwoCol
+        left={props.row.agentName ?? props.row.agent}
+        leftColor={MUTED_COLOR}
+        right={props.row.providerName}
+        rightColor={SECONDARY_COLOR}
+        onToggle={props.onToggle}
+      />
+      <Show when={props.row.modelName ?? props.row.modelID}>
+        <TwoCol
+          left={(props.row.modelName ?? props.row.modelID) ?? ""}
+          leftColor={SECONDARY_COLOR}
+          right={props.row.variant}
+          rightColor={SECONDARY_COLOR}
+          onToggle={props.onToggle}
+        />
+      </Show>
+      <TwoCol
+        left={`${fmtElapsed(props.row.elapsedMs)} · ${fmtTokens(props.row.tokens)}`}
+        leftColor={SECONDARY_COLOR}
+        rightLabel={props.row.cacheRate === undefined ? undefined : "缓存"}
+        right={props.row.cacheRate === undefined ? undefined : fmtPct(props.row.cacheRate)}
+        rightColor={CACHE_COLOR}
+        onToggle={props.onToggle}
+      />
       {/* 首字/速度：还没有可算样本时整行不渲染（不画空行、不显示占位） */}
       <Show when={fmtPerf(props.row.ttftMs, props.row.tps)}>
-        {(text) => (
-          <box flexDirection="row" height={1} onMouseDown={props.onToggle}>
-            <text fg={SECONDARY_COLOR} wrapMode="none">{text()}</text>
-          </box>
-        )}
-      </Show>
-      <Show when={props.row.expanded}>
-        <TaskInspector row={props.row} />
+        <TwoCol
+          left={fmtSec(props.row.ttftMs)}
+          leftColor={SECONDARY_COLOR}
+          right={fmtTpsText(props.row.tps) || undefined}
+          rightColor={SECONDARY_COLOR}
+          onToggle={props.onToggle}
+        />
       </Show>
     </box>
   )
@@ -238,7 +302,7 @@ export function SubagentSection(props: {
                 when={row().running}
                 fallback={<StoppedRow row={row()} onToggle={() => props.onToggle(row().id)} />}
               >
-                <RunningRow row={row()} frame={props.frame} onToggle={() => props.onToggle(row().id)} />
+                <RunningRow row={row()} frame={props.frame} />
               </Show>
             )}
           </Index>
@@ -255,7 +319,7 @@ export function SubagentSection(props: {
                     when={row().running}
                     fallback={<StoppedRow row={row()} onToggle={() => props.onToggle(row().id)} />}
                   >
-                    <RunningRow row={row()} frame={props.frame} onToggle={() => props.onToggle(row().id)} />
+                    <RunningRow row={row()} frame={props.frame} />
                   </Show>
                 )}
               </Index>

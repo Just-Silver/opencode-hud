@@ -33,8 +33,14 @@ export function subagentIdsOf(
 export type SubagentRow = {
   id: string
   agent: string
+  /** agent 显示名（宿主目录里的 name）；查不到时回退 agent id */
+  agentName?: string
   title?: string
   modelID?: string
+  /** 模型显示名（宿主目录里的 name）；查不到时回退 modelID */
+  modelName?: string
+  /** 供应商显示名（宿主目录里的 name）；查不到时回退 providerID */
+  providerName?: string
   variant?: string
   /** 子代理在用的供应商（退出排序用，不展示） */
   providerID?: string
@@ -60,6 +66,33 @@ export function subagentCacheRate(tokens: SubagentInfo["tokens"]): number | unde
   return cacheRateOf(tokens.cache?.read ?? 0, tokens.input ?? 0, tokens.cache?.write ?? 0)
 }
 
+// 模型/供应商显示名：宿主目录按 providerID + id 双键匹配。
+// 只按 id 会把同名模型认成别家（名称可能不同），provider 身份缺失时才退回按 id 找。
+export type ModelLabel = { id?: string; providerID?: string; name?: string }
+export type ProviderLabel = { id?: string; name?: string }
+export type AgentLabel = { id?: string; name?: string }
+
+export function subagentLabels(
+  model: { id?: string; providerID?: string } | undefined,
+  models: readonly ModelLabel[],
+  providers: readonly ProviderLabel[],
+  agents: readonly AgentLabel[],
+  agentID?: string,
+): { modelName?: string; providerName?: string; agentName?: string } {
+  const id = model?.id
+  const providerID = model?.providerID
+  const matched =
+    (providerID ? models.find((m) => m.providerID === providerID && m.id === id) : undefined) ??
+    (id ? models.find((m) => m.id === id) : undefined)
+  const provider = providerID ? providers.find((p) => p.id === providerID) : undefined
+  const agent = agentID ? agents.find((a) => a.id === agentID) : undefined
+  return {
+    modelName: matched?.name || id,
+    providerName: provider?.name || providerID,
+    agentName: agent?.name || agentID,
+  }
+}
+
 // 从 SessionInfo 组装一行；无 tokens 也显示（新起的子代理）
 export function buildRow(
   info: SubagentInfo,
@@ -69,13 +102,17 @@ export function buildRow(
     now: number
     prevElapsed?: number
     perf?: { ttftMs?: number; tps?: number }
+    labels?: { modelName?: string; providerName?: string; agentName?: string }
   },
 ): SubagentRow {
   return {
     id: info.id,
     agent: info.agent || "agent",
+    agentName: opts.labels?.agentName,
     title: info.title,
     modelID: info.model?.id,
+    modelName: opts.labels?.modelName,
+    providerName: opts.labels?.providerName,
     variant: info.model?.variant,
     providerID: info.model?.providerID,
     tokens: subagentTokens(info.tokens),

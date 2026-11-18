@@ -6,6 +6,7 @@ import assert from "node:assert/strict"
 import {
   AGENT_COUNT_NUM_WIDTH,
   AGENT_INSPECTOR_INNER,
+  AGENT_RUNNING_INNER,
   AGENT_TITLE_MAX,
   AGENT_TOTAL_WIDTH,
   CARD_INNER,
@@ -25,6 +26,26 @@ test("子代理 Task Inspector：三组双列在最窄版心内同行", () => {
   assert.ok(AGENT_INSPECTOR_INNER < CARD_INNER, "详情版心必须窄于卡片内容（运行中卡片还要减去强调线与内边距）")
   // 主行标题列不能被数字列挤到不可用
   assert.ok(AGENT_TITLE_MAX >= 12, `标题列只剩 ${AGENT_TITLE_MAX} 列，短标题也会频繁截断`)
+})
+
+test("运行中卡片：耗时 · 消耗（左）与缓存率（右）在 30 列内同行", () => {
+  const left = "58m05s · 999.9k"
+  const right = "缓存 100.0%"
+  assert.ok(
+    visualWidth(left) + 1 + visualWidth(right) <= AGENT_RUNNING_INNER,
+    `左右两列占 ${visualWidth(left) + 1 + visualWidth(right)} 列，超出运行中块内宽 ${AGENT_RUNNING_INNER}`,
+  )
+})
+
+test("运行中卡片：Agent·供应商、模型·强度 两组双列在 30 列内同行", () => {
+  assert.ok(
+    visualWidth("explore") + 1 + visualWidth("Open Design") <= AGENT_RUNNING_INNER,
+    "agent + 供应商名",
+  )
+  assert.ok(
+    visualWidth("DeepSeek V4.1 Flash") + 1 + visualWidth("xhigh") <= AGENT_RUNNING_INNER,
+    "模型显示名 + 强度（最坏值）",
+  )
 })
 
 test("额度组头：箭头 + 名称列 + 状态注记（倒计时/重试）在同一行内", () => {

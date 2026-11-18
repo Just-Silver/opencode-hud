@@ -2,7 +2,7 @@
 
 <!-- 职责：定义侧边栏「子代理」区块的数据口径、布局与交互（含展开行性能的落点）；不写：首字/速度的口径（见 docs/design-performance-footer.md）、额度查询、安装与更新 -->
 
-- 状态：**已实现**（2026-10-19，v2.4.0；2026-11-11 改为独立圆角卡片 + 运行中任务卡）
+- 状态：**已实现**（2026-10-19，v2.4.0；2026-11-11 改为独立圆角卡片 + 运行中任务卡；2026-11-18 运行中卡片扩到五行：agent/供应商、模型/强度、缓存率进入常驻行，展开区对运行中不再重复）
 - 落点：`sidebar.content` 内、`额度` 卡片之后的独立 `DashboardCard`
 - 前提：只支持 opencode2；不做持久化、不做事件状态机、不做斜杠命令
 
@@ -14,12 +14,13 @@
 | --- | --- | --- |
 | 子会话列表 | `context.data.session.family(sessionID)` 去掉自身 | 宿主进入会话时已 `sync(sid, {children: true})` 填充（`CHILD_PAGE = 200` 分页拉全）；子会话结束后**不会**从 family 表移除 |
 | 子会话标题 | `session.get(id)?.title` | 主行首列展示；缺失时回退 agent 类型 |
-| agent 类型 | `session.get(id)?.agent` | 展开行展示 |
+| agent 类型 | `session.get(id)?.agent`；显示名按 `location.agent.list()` 的 id 匹配 `name` | 匹配不到回退 id；运行中主行第 2 行，已停止在展开行 |
 | 耗时 | 见 §2 | |
 | 总消耗 | `tokens.input + output + reasoning + cache.read + cache.write` | 会话级累计聚合（`session_v2` 的 `tokens_*` 列），**含缓存读，不排除** |
-| 模型 | `session.get(id)?.model?.id` | `ModelRef` 的 `id` |
-| 思考强度 | `session.get(id)?.model?.variant` | 可选；缺失则整段不渲染 |
-| 缓存命中率 | `tokens.cache.read / (input + cache.write + cache.read)` | 与会话区块同一口径（`model/usage.ts` 的 `cacheRateOf`）；无数据则整行不渲染 |
+| 模型 | `session.get(id)?.model?.id`；显示名按 `location.model.list()` 的 `providerID + id` 匹配 `name` | 匹配不到回退 id；运行中主行第 3 行 |
+| 供应商 | `model.providerID` → `location.provider.list()` 的 `name` | 匹配不到回退 providerID；运行中主行第 2 行 |
+| 思考强度 | `session.get(id)?.model?.variant` | 可选；缺失则整段不渲染；运行中主行第 3 行 |
+| 缓存命中率 | `tokens.cache.read / (input + cache.write + cache.read)` | 与会话区块同一口径（`model/usage.ts` 的 `cacheRateOf`）；运行中主行第 4 行，已停止在展开行；无数据则整段不渲染 |
 | 首字 / 速度 | 展开中或运行中：`message.sync(id)` → `message.list(id)` → `latestPerf` | 已结束且未展开的条目不取数；首字与速度分别回溯最近有效样本，与底部同口径 |
 | 运行态 | `session.status(id)`：`"运行中"` / `"idle"` | 行首 spinner、耗时口径分支、排序 |
 | 结局 | `SessionInfo.outcome`：`succeeded` / `失败` / `interrupted` | 宿主在 execution 终态写 `idle_outcome`（`packages/core/src/session/projector.ts` 的 `projectIdle`）；**只在 `运行中=false` 时采信**（运行中它仍是上一轮的旧值） |
@@ -59,7 +60,7 @@
 
 视觉分层（Native Pro）：
 
-- **运行中**：三行任务卡——抬升底色 `RAISED_COLOR` + 左侧绿色强调线（与 spinner / 计数同色 `stateColor("running")`）+ spinner + 加粗标题；第二行 `耗时 · 消耗 tok`；第三行 `首字 · 速度`（无有效样本时整行不渲染）。点击任意一行展开详情。
+- **运行中**：五行任务卡——抬升底色 `RAISED_COLOR` + 左侧绿色强调线（与 spinner / 计数同色 `stateColor("running")`）+ spinner + 加粗标题；第二行 `agent · 供应商`；第三行 `模型 · 强度`；第四行 `耗时 · 消耗 · 缓存命中`；第五行 `首字 · 速度`（无有效样本时整行不渲染）。点击任意一行展开详情。
 - **已停止**：单行紧凑行，状态点按**黄色** `WARNING_COLOR`（成功 / 中断 / 未知结局共用黄），**失败用红**；标题次级色。
 - **绿色专指「运行中」**：运行中 spinner 与卡片头计数点都用绿 `SUCCESS_COLOR`；已停止的点**不能用绿**——同一条列表里「正在跑」与「已跑完」同色就失去区分（v3.1.0 的绿=运行中、黄=已停止，2026-11-11 的 HUD 5.0 曾把绿改给「成功」，已改回）。
 
@@ -95,32 +96,41 @@
 - 标题列超宽用 `truncateVisual`；两个数值列 `padStartVisual` 定宽，右缘严格对齐。
 - 展开时在下方补详情（缩进 2，`RAISED_COLOR` 抬升底色），不与主行同底色。
 
-### 3.3 运行中任务卡（3 行 + 详情）
+### 3.3 运行中任务卡（5 行 + 详情）
 
 ```
 ▍⠋ Refactor API                    ▸
-▍ 2m18s · 1.2M tok
-▍ 0.42s · 48 tok/s
+▍ explore                  Open Design
+▍ DeepSeek V4.1 Flash            high
+▍ 2m18s · 1.2M             缓存 98.4%
+▍ 0.42s                   48 tok/s
 ```
 
 - 左侧线由 `border={["left"]}` + `borderColor={stateColor("running")}`（绿）实现，与行首 spinner、卡片头计数同色；右侧箭头表示展开态。
 - 内宽 30：spinner 2 + 标题(≤26) + 垫片 + 箭头 1。
-- 第二行是 `fmtElapsed · fmtTokens tok`（`tok` 明确单位，避免裸数字歧义）。
-- 第三行是 `fmtPerf`（`首字 · 速度`，与底部同口径）；还没有可用样本时整行不渲染，不占位。
-- 点击卡片任意一行切换展开。
+- 第 2 行 `agent 显示名`（左）· `供应商名`（右）：agent 名按 `location.agent.list()` 的 id 匹配 `name`（如 `qa` → `QA`、`explore` → `Explore`），查不到回退 id；供应商缺失时右列不渲染，左列占满。
+- 第 3 行 `模型名`（左）· `强度`（右）：模型与供应商名来自宿主目录（`model/subagent.ts` 的 `subagentLabels`），按 `providerID + id` 双键匹配 `name`，查不到回退 id。
+- 第 4 行 `耗时 · 消耗`（左）· `缓存率`（右）：缓存率标签用弱化色、数值用 `CACHE_COLOR`（与展开区一致）；无缓存数据时右列不渲染。最坏组合 `58m05s · 999.9k` + 1 + `缓存 100.0%` 占 27 列，`tests/layout.test.ts` 钉住不换行。
+- 第 5 行 `首字`（左）· `速度`（右）：还没有可用样本时整行不渲染，不占位。
+- 双列统一由 `TwoCol` 承担：先算右列宽度再截断左列（`truncateVisual`），中间空白由 `flexGrow` 吸收，不手写空格。
+- **展开只影响标题**：收起时标题按 `AGENT_RUNNING_TITLE_MAX` 截断；展开后同一行改为全文并按字符换行（`wrapMode="char"`），其余四行完全不变，**不额外渲染详情块**。运行中不维护第二套 UI。
 
-### 3.4 展开详情（Task Inspector，双列）
+### 3.4 展开详情（Task Inspector，只服务已停止条目）
+
+已停止主行是单行摘要，展开补全与运行中相同顺序的信息行：
 
 ```
   最终审查三库拆分（完整标题，按字符换行）
-  deepseek-v4.1-flash            high
-  general                         缓存 98.4%
-  0.42s                       48 tok/s        ← 只有已停止条目
+  Reviewer                 Open Design
+  Hy4 Flash Free                 high
+  2m52s · 558k           缓存 88.5%
+  2.94s                   207 tok/s
 ```
 
-- 统一双列：左列左对齐、吃剩余宽度（可换行），右列贴右缘；中间靠弹性盒留白，不手写空格。右列标签「缓存」用弱化色，数值加粗。
-- 行内容：完整标题（不截断）/ 模型 + 强度（右）/ Agent + 缓存命中率（右）/ TTFT + TPS（右，**仅已停止条目**）。运行中条目的首字/速度已在前一行常驻第三行显示，详情不重复。
-- **没有独立的「状态」行**：状态、耗时、累计消耗都由主行承担（v5.1.0 的 Inspector 改版，见 `view/TaskInspector.tsx` 文件头）。空值行整行不渲染。
+- 行序与运行中的四行完全一致：Agent · 供应商 / 模型 · 强度 / 耗时 · 消耗 · 缓存率 / 首字 · 速度；颜色也一致（agent `MUTED`、供应商与模型 `SECONDARY`、缓存标签 `MUTED` + 数值 `CACHE_COLOR`、首字/速度 `SECONDARY`）。
+- 完整标题沿用收起态的 `SECONDARY_COLOR`、不加粗：展开只补信息，不改变同一行文字的强调。
+- 双列：左列左对齐、吃剩余宽度（可换行），右列贴右缘；中间靠弹性盒留白，不手写空格。
+- **运行中不渲染本组件**：运行中展开只把标题换成全文（§3.3），避免同一屏出现两份相同指标。
 - 版心 27 列（运行中卡片内宽 30 − 左右内边距 3，`AGENT_INSPECTOR_INNER`；已停止行共用这个上限以免溢出）。
 
 ### 3.5 历史折叠

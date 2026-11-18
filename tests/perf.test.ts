@@ -22,6 +22,7 @@ import {
   subagentCacheRate,
   subagentCounts,
   subagentIdsOf,
+  subagentLabels,
   subagentStateOf,
   totalTokensText,
   visibleRows,
@@ -191,6 +192,61 @@ test("buildRow：透传子代理最近一步的首字与速度", () => {
   const bare = buildRow(info, { running: false, expanded: false, now: 6000 })
   assert.equal(bare.ttftMs, undefined)
   assert.equal(bare.tps, undefined)
+})
+
+test("subagentLabels：模型名按 providerID + id 匹配，同名别家不串", () => {
+  const models = [
+    { id: "deepseek-v4.1-flash", providerID: "opendesign", name: "DeepSeek V4.1 Flash" },
+    { id: "deepseek-v4.1-flash", providerID: "other", name: "别家的同名模型" },
+  ]
+  const providers = [{ id: "opendesign", name: "Open Design" }]
+  const agents = [{ id: "qa", name: "QA" }]
+  assert.deepEqual(
+    subagentLabels({ id: "deepseek-v4.1-flash", providerID: "opendesign" }, models, providers, agents, "qa"),
+    {
+      modelName: "DeepSeek V4.1 Flash",
+      providerName: "Open Design",
+      agentName: "QA",
+    },
+  )
+})
+
+test("subagentLabels：provider 身份缺失时按 id 兜底匹配", () => {
+  const models = [{ id: "m1", providerID: "p1", name: "模型一" }]
+  assert.deepEqual(subagentLabels({ id: "m1" }, models, [], [], "explore"), {
+    modelName: "模型一",
+    providerName: undefined,
+    agentName: "explore",
+  })
+})
+
+test("subagentLabels：目录里查不到时回退 id，没有模型信息则不产出显示名", () => {
+  assert.deepEqual(subagentLabels({ id: "m1", providerID: "p1" }, [], [], [], "reviewer"), {
+    modelName: "m1",
+    providerName: "p1",
+    agentName: "reviewer",
+  })
+  assert.deepEqual(subagentLabels(undefined, [], [], []), {
+    modelName: undefined,
+    providerName: undefined,
+    agentName: undefined,
+  })
+})
+
+test("buildRow：把模型、供应商与 agent 显示名带到行上", () => {
+  const row = buildRow(
+    { id: "s", agent: "explore", model: { id: "m1", providerID: "p1", variant: "high" } },
+    {
+      running: true,
+      expanded: false,
+      now: 1000,
+      labels: { modelName: "模型一", providerName: "供应商一", agentName: "探索" },
+    },
+  )
+  assert.equal(row.modelName, "模型一")
+  assert.equal(row.providerName, "供应商一")
+  assert.equal(row.agentName, "探索")
+  assert.equal(row.variant, "high")
 })
 
 test("subagentElapsedMs：运行中按 now，结束后用 idle、回退 updated", () => {

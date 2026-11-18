@@ -5,7 +5,15 @@ import { createEffect, createMemo, createSignal, onCleanup } from "solid-js"
 import { usePlugin } from "@opencode/plugin/tui"
 import type { PerfMessage, SubagentInfo } from "../../model/types.ts"
 import { latestPerf } from "../../model/perf.ts"
-import { buildRow, runningProviderIDs, sortRows, SPINNER_INTERVAL_MS, subagentIdsOf, type SubagentRow } from "../../model/subagent.ts"
+import {
+  buildRow,
+  runningProviderIDs,
+  sortRows,
+  SPINNER_INTERVAL_MS,
+  subagentIdsOf,
+  subagentLabels,
+  type SubagentRow,
+} from "../../model/subagent.ts"
 
 // sessionID 传 getter：组件体只执行一次，传值会把 family/content 钉在首帧的会话上。
 export function useSubagents(sessionID: () => string | undefined) {
@@ -65,12 +73,24 @@ export function useSubagents(sessionID: () => string | undefined) {
   // 耗时高水位：跨 memo 重算保留，避免步骤边界的 idle 旧值把分钟数拉回去
   const elapsedHigh = new Map<string, number>()
 
+  // 模型/供应商目录：子代理与父会话同一 location，显示名按宿主导出解析
+  const location = createMemo(() => {
+    const id = sessionID()
+    if (!id) return undefined
+    return (ctx.data.session.get(id) as { location?: { directory: string; workspaceID?: string } } | undefined)
+      ?.location
+  })
+  const models = createMemo(() => (location() ? (ctx.data.location.model.list(location()) ?? []) : []))
+  const providers = createMemo(() => (location() ? (ctx.data.location.provider.list(location()) ?? []) : []))
+  const agents = createMemo(() => (location() ? (ctx.data.location.agent.list(location()) ?? []) : []))
+
   const rows = createMemo<SubagentRow[]>(() => {
     void subTick() // 运行中条目靠它刷新耗时
     const now = Date.now()
     const state = expanded()
     const perf = subagentPerf()
     const running = runningSet()
+    const catalog = { models: models(), providers: providers(), agents: agents() }
     const list: SubagentRow[] = []
     for (const id of subagentIds()) {
       const info = ctx.data.session.get(id) as SubagentInfo | undefined
@@ -82,6 +102,7 @@ export function useSubagents(sessionID: () => string | undefined) {
           now,
           prevElapsed: elapsedHigh.get(id),
           perf: perf[id],
+          labels: subagentLabels(info.model, catalog.models, catalog.providers, catalog.agents, info.agent),
         }),
       )
     }
