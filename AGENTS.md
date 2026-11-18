@@ -90,6 +90,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `.github/workflows/release.yml` 的链路固定为 `preflight → verify（复用 ci.yml）→ release → changelog`，workflow 级 `concurrency` 串行且不取消在跑的发布。preflight 校验正式 tag 正则、`VERSION` 精确一致、`git merge-base --is-ancestor` 证明 tag 来自 `main`；verify 就是整条 CI 门禁，**门禁失败不发版**。
 - 资产协议：`scripts/build-release-asset.sh "$TAG" dist` 产出 `opencode-hud-vX.Y.Z.tar.gz` + 同名 `.sha256`（可复现、拒绝链接/隐藏条目）。Release **先以 draft 创建并上传**，再从线上 `gh release download` 回读两个资产，用 sidecar 复核归档字节（sidecar 的存在性由下载路径隐含验证），全部通过才 `gh release edit --draft=false`。已公开的 Release 重跑直接失败「拒绝覆盖资产」；draft 重跑先按本次两个资产名 `gh release delete-asset` 再上传。**禁止 `--clobber` 与 `|| true`**。
 - 发布顺序：先发 Release、后回推 `CHANGELOG.md`。回推 job 只允许提交 `CHANGELOG.md`（提交后额外断言 `git diff --name-only origin/main HEAD` 只有它），且每轮 `git fetch origin main` 后都比对 `git show "$TAG:CHANGELOG.md"` 与 `origin/main` 的同名字节，不一致即失败而不是覆盖；连续 3 次失败会明确报「Release 已发布，请手工合并」。**不要手改 `CHANGELOG.md`**（发版时会被全量覆盖）。
+- **Release 说明中的版本级升级须知放 `docs/release-notes/<tag>.md`**：release job 生成 git-cliff 正文后会把该文件前置追加（文件不存在即跳过），因此旧版无法自我修复这类说明既能进 Release、又不污染 README。已发布 Release 的说明不要手工改（release job 重跑会覆盖）。
 - **Release 已发布后若只有 changelog job 失败，用 Re-run failed jobs 只重跑它**；整条 workflow 重跑会再次进入 release job，因公开态按设计失败。安装/更新/卸载共用目录锁、资产校验与旧名目录的手工清理，见「插件加载与安装」。
 - 更新检查走 `github.com/<repo>/releases/latest` 的 302 `Location`，**不要改 `api.github.com`**（未认证限流 60 次/小时，部分网络直接 403）。节流：成功 TTL 24h / 失败冷却 1h / 超时 8s；缓存写到 `pluginDataDir()/update-check.json`。
 - 一键更新是插件自包含：取 `.sha256` → 有界下载 → 解压前扫描归档头（与安装脚本同一套规则）→ 目录锁内原子替换 `globalPluginDir()`；任何校验失败都不触碰现有安装，也不回退源码归档/`git clone`/`main`。**不要改回“下载并执行安装脚本”**：`irm ... | iex` 会被 Windows Defender 判为 `Trojan:Win32/Commando.A!ml`。`child_process` 只用于本地 `tar`（120s 超时、`windowsHide`）。
@@ -124,5 +125,6 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `docs/provider-openai-quota.md` — OpenAI/ChatGPT 订阅额度：`wham/usage` 端点、真实响应、**只有 Codex 登录凭据可读**（token-sharing 401）与复验命令。
 - `.opencode/skills/managing-quota-providers/SKILL.md` — 供应商新增/修改/删除流程。
 - `CHANGELOG.md` — 发版自动生成、历史冻结；`TODO.md` — 跟踪中的上游问题。
+- `docs/release-notes/` — 按 tag 命名的版本级升级须知（发版 job 前置追加到 Release 说明，文件不存在则跳过）。
 - `docs/audit-2026-11-16.md` — 2026-11-16 全项目审计：覆盖范围、已修问题、验证证据、16 组审查事项及后续用户确认（唯一长期审计入口）。
 - 新文档必须在同一次改动中登记到本节目录；代码注释只写不显然的原因/约束，来源、迁移、review 记录放 `docs/` 或本文件。
