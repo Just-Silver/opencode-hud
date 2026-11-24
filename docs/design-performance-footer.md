@@ -1,29 +1,20 @@
 # 性能区块设计（首字 + 速度）
 
-<!-- 职责：定义 TTFT / token 速度两指标的口径、取数来源与底部状态栏布局；不写：子代理区块（见 docs/design-subagent-section.md）、额度查询、安装更新 -->
+<!-- 职责：定义 TTFT / token 速度两指标的口径、取数来源与输入框上方性能行的布局；不写：子代理区块（见 docs/design-subagent-section.md）、额度查询、安装更新 -->
 
-- 状态：**已实现**（2026-10-19，v2.4.0）；**2026-10-21 v4.0.0 移除实时链路，改为每步精确值**
-- 落点：`prompt.footer.status`（输入框下方状态行，目录路径与 `295.0K (28%)` 之间）
+- 状态：**已实现**（2026-10-19，v2.4.0）；**2026-10-21 v4.0.0 移除实时链路，改为每步精确值**；**2026-11-24 落点迁到 `session.composer.top`（输入框正上方独占一行）**
+- 落点：`session.composer.top`（输入框正上方独立一行；`──── TTFT 4.99s · 155 tok/s ──` 的右对齐分隔线形态）
 - 前提：只支持 opencode2；不做命令、不做 `ui.panel`、**不显示延迟**
 
 ## 1. 为什么是这个落点
 
-`component/prompt/index.tsx` 的结构：
-
-```tsx
-<box flexDirection="row" justifyContent="space-between" gap={2}>
-  <Slot path="prompt.footer">
-    <Slot path="prompt.footer.status">
-      <box flexGrow={1} flexShrink={1} minWidth={0}>  ← 目录路径 / interrupt，左对齐
-    </Slot>
-    <Slot path="prompt.footer.file">…</Slot>
-  </Slot>
-  {宿主 builtin append: "295.0K (28%)" + "ctrl+p commands"}
-</box>
-```
-
+- **宿主的 prompt 状态行是动态拼的**：目录路径长度随仓库变、忙时多出子代理/用量、窄屏砍掉快捷键提示——挂在 `prompt.footer.status` 里，数字会随这些内容左右漂，读数每次都要重新找。
+- **`session.composer.top` 是空的**：宿主只 mount、不填充（`routes/session/mod.rs` 的 `composer_slot`），一行完全归我们，位置固定、宽度够、紧贴流式输出的尾部。
+- **不会被排队消息挤掉**：排队块排在它上面，出现时本行跟着输入框整体下移，不隐藏、不裁切。
+- 首页没有这个 slot，正好首页也没有会话样本。
 - 元信息行（`Build · Deepseek V4.1 Flash … high`）是 `PromptMetadataRow`，**不在 slot 树里**，无法注入。
-- `prompt.footer.status` 的状态盒是 `flexGrow={1} flexShrink={1} minWidth={0}`，**会自动让位**：我们以 `flexShrink={0}` 追加，宽度稳定，代价是路径被截短。
+
+历史（v2.4–2026-11-24）：曾挂在 `prompt.footer.status`，那时依赖「状态盒 `flexGrow={1} flexShrink={1} minWidth={0}` 会主动让位、我们 `flexShrink={0}` 保持宽度」——能显示，但位置不固定，故迁走。
 
 ## 2. 口径（精确值）
 
@@ -92,44 +83,27 @@ latestPerf(messages)                       // 从最后一条向前回溯，取�
 
 ### 结构确认
 
-`prompt.footer` 与 `prompt.footer.status` 的 `<Slot>` 均渲染为 fragment（不额外包 box），因此 `append: "prompt.footer.status"` 的内容会成为那个 `flexDirection="row"` 容器的**直接子元素**，与目录路径**同一行**、按 `gap={2}` 排列：
+落点是 `session.composer.top`：会话列里排在输入框正上方的一行，宿主只 mount 这个 slot、不往里填任何内容（`routes/session/mod.rs` 的 `composer_slot`），所以这一行的宽高完全由我们决定。
 
 ```
-row (width 100%, justifyContent: space-between, gap 2)
- ├─ Slot prompt.footer.status
- │   ├─ 状态盒  flexGrow={1} flexShrink={1} minWidth={0}   ← 目录路径，会主动让位
- │   └─ 我们的块  flexShrink={0}                            ← 宽度稳定
- ├─ Slot prompt.footer.file                                ← 编辑器文件名
- └─ 宿主 builtin（append prompt.footer）                   ← "295.0K (28%)  ctrl+p commands"
+column（会话列，padding 2/2）
+ ├ transcript.root()                      ← 消息历史
+ ├ queued.root()                          ← 排队消息（约 4 行）
+ ├ session.composer.top                   ← 我们：width 100%，分隔线 + 右对齐读数
+ └ prompt.root()  [ frame / bottom / footer_row ]
+                                   └ footer_row: location | file | 宿主提示
 ```
 
-我们用 `flexShrink={0}` 保持宽度，路径靠 `flexGrow={1}` 吸收剩余空间。
+- 行容器 `width="100%"` + `flexDirection="row"`：左段是一条 `flexGrow={1}` 的底边框（`border={["bottom"]}`；兼容层只透传 rounded/heavy/double，未指定时默认 Single，正好是我们要的细线）填满剩余宽度，右段固定 `width={2}` 一条同样的底边框，文字夹在中间。
+- 分隔线用**边框**而不是重复的 `─` 字符：宽度由布局自动分配，**不做任何宽度测量**，因此不会算错列数、不会换行、resize 时不抖。
+- 排队消息在它**上面**，出现时本行跟着输入框整体下移约 4 行，不会被隐藏或裁掉。
 
-### 两档阈值
+### 宽度预算
 
-| 终端宽度 | 档位 | 显示 | 列宽 |
-| --- | --- | --- | --- |
-| ≥ 60 | 完整 | `0.42s · 48.2 tok/s` | 17 |
-| < 60 | 极简 | `48.2 tok/s` | 10 |
-| `showDetails === false` | 隐藏 | 整段不渲染 | 0 |
-| 首页 / 无 `sessionID` / 无有效样本 | 不渲染 | — | 0 |
+不再分档：整行独占，文字段固定约 26 列（`TTFT ` + 时长 + ` · ` + 速度 + ` tok/s`，两侧各 1 列间距 + 右侧 2 列分隔线），其余全部交给分隔线，因此没有阈值、没有 `useTerminalDimensions()` 分支。
 
-**`60` 是本插件当前选择的紧凑阈值，不是宿主的硬阈值**（宿主 2.2.6 的 prompt 收缩下界是 80；见 `packages/tui/src/component/prompt/index.tsx`）。`showDetails === false` 是宿主的强制隐藏信号：整段不渲染，不是降成极简档。60 只表达本插件自身的列宽预算：终端更窄时只留速度，避免我们的块挤掉目录路径。
+**标签只用英文缩写**：`TTFT`（Time To First Token）是 LLM 领域的标准叫法，比中文「首字」短且不抢视觉。配色分层：分隔线与 `TTFT`/`tok/s`/`·` 用次要色（`SECONDARY_COLOR`，线用 `BORDER_COLOR`），只有两个数值用正文色。
 
-**不再有「首字」前缀**：状态行本就窄，`3.78s · 169 tok/s` 的顺序（时长在前、速度在后）已自明；去掉标签省 5 列（CJK 实占 5 列），完整档从 22 降到 17。原来靠 100 列区分的「详细档」与「紧凑档」在去掉前缀后内容完全相同，故合并为一档。
-
-固定开销：
-
-```
-输入框左右 padding 4 + 宿主 usage 12 + 宿主 commands 15 + 三处 gap 6 + 我们的完整档 17 = 54
-终端 100 → 目录路径剩 46 列
-终端 80  → 路径剩 26 列（`D:\Code\...\tui-usage:main` 约 30 列 → 会被截断但可辨）
-终端 59  → 路径剩 5 列 → 降到极简档
-```
-
-固定开销实为动态：宿主在无 usage / 无子代理时会改显示快捷键提示，宽度变化。因此分档只能保守，真正的兜底是容器 `flexShrink={0}` + 文本 `truncate`，极端宽度下截断自己而不是挤坏宿主。
-
-**宽度来源**：`useTerminalDimensions()`（`@opentui/solid`，宿主同款，随 resize 响应式）；退路 `context.renderer.terminalWidth` + 自建 resize 监听。
 
 ### 单一形态（无相位）
 
@@ -137,7 +111,7 @@ row (width 100%, justifyContent: space-between, gap 2)
 
 | 场景 | 显示 |
 | --- | --- |
-| 有有效步样本 | `0.42s · 48.2 tok/s`（窄屏 / 收缩时 `48.2 tok/s`） |
+| 有有效步样本 | `──── TTFT 0.42s · 48.2 tok/s ──`（右对齐） |
 | 当前步生成中（无新样本） | 与上一态完全相同——沿用最近一条已完成步的值 |
 | 首页 / 无 `sessionID` / 无任何有效样本 | 不渲染，不显示 `--` |
 
@@ -147,7 +121,7 @@ row (width 100%, justifyContent: space-between, gap 2)
 
 ### 交互
 
-**纯展示，不可点击**。不做「点击切换详细/极简」、不做 hover、不弹窗。档位只由终端宽度决定；`showDetails === false` 时整段隐藏。
+**纯展示，不可点击**。不做「点击切换档位」、不做 hover、不弹窗；没有档位，只有「有样本 / 无样本」两种状态。
 
 ## 5. 不做的部分
 
@@ -157,7 +131,7 @@ row (width 100%, justifyContent: space-between, gap 2)
 - 侧边栏主行常驻展示（展开行复用同一口径，见 `docs/design-subagent-section.md`）
 - 历史文本首字补造（无时间戳就是无，不猜）
 - 温度/成本/模型名等元信息（元信息行不可注入）
-- **任何鼠标交互**：不可点击、不切换档位、不弹窗（档位只由宽度决定；`showDetails === false` 整段隐藏）
+- **任何鼠标交互**：不可点击、不切换档位、不弹窗（只有「有样本 / 无样本」两种状态）
 
 ## 6. 已知取舍
 

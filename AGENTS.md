@@ -9,7 +9,7 @@
 - 单一 opencode2 TUI 插件仓库，非 monorepo。**没有根 `package.json`、lockfile 或构建步骤**；测试用 Node 内建，不要为跑测试引入依赖或打包配置。
 - 唯一插件：`.opencode/plugins/opencode-hud/`，入口 `tui.tsx`（`Plugin.define id:"opencode-hud"`），注册两个 slot：
   - `sidebar.content` → `view/Sidebar.tsx`（ViewModel：信号/memo/副作用都在这里）
-  - `prompt.footer.status` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度）
+  - `session.composer.top` → `footer.tsx` → `view/PerfFooter.tsx`（首字/速度，输入框正上方一行）
 - 桌面 GUI 入口（`gui-experimental.cjs`）与 Markdown 配色**已冻结并删除**，当前只服务 TUI；恢复方式与设计见 `docs/design-desktop-entry.md`。
 - **宿主源码在本机**：`D:\Code\Projects\Agents\opencode`（opencode 2.x 工作树，版本以它 `package.json` 为准）。核对宿主 API、slot 跨度、键位、内置 UI 行为时直接读这里（`packages/tui/src`、`packages/plugin/src`、`packages/client/src`、`packages/schema/src`），**不要先搜网**；文档里引用的 `packages/...` 行号即指这个目录。
 - 目录职责：`model/` = 数据与纯函数；`quota/` = 供应商发现 + 凭据 + 查询；`shared/` = 通用纯函数；`view/` = Solid UI；`view/hooks/` = ViewModel（会话用量 / 子代理 / 额度 / 更新 / 共享秒级时钟）；`view/layout.ts` = 侧边栏几何常量唯一真源；`update/` = 更新检查与一键更新。
@@ -86,6 +86,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 
 # 更新与发版
 
+- **版本号必须先问用户**：每次发版前用提问工具（`question`）把候选版本（沿用 `VERSION` / patch / minor / major）列给用户确认，**不得自行决定**；用户确认后再改 `VERSION` 并打 tag。
 - 版本唯一来源：`update/version.ts` 的 `VERSION`（SemVer）。流程：改 `VERSION` → commit 到 `main` → `git tag vX.Y.Z` → `git push origin vX.Y.Z`。**只发正式版 `vX.Y.Z`**（无预发布/构建元数据），tag 必须落在 `main` 上。
 - `.github/workflows/release.yml` 的链路固定为 `preflight → verify（复用 ci.yml）→ release → changelog`，workflow 级 `concurrency` 串行且不取消在跑的发布。preflight 校验正式 tag 正则、`VERSION` 精确一致、`git merge-base --is-ancestor` 证明 tag 来自 `main`；verify 就是整条 CI 门禁，**门禁失败不发版**。
 - 资产协议：`scripts/build-release-asset.sh "$TAG" dist` 产出 `opencode-hud-vX.Y.Z.tar.gz` + 同名 `.sha256`（可复现、拒绝链接/隐藏条目）。Release **先以 draft 创建并上传**，再从线上 `gh release download` 回读两个资产，用 sidecar 复核归档字节（sidecar 的存在性由下载路径隐含验证），全部通过才 `gh release edit --draft=false`。已公开的 Release 重跑直接失败「拒绝覆盖资产」；draft 重跑先按本次两个资产名 `gh release delete-asset` 再上传。**禁止 `--clobber` 与 `|| true`**。
@@ -100,7 +101,7 @@ npx --yes esbuild .opencode/plugins/opencode-hud/tui.tsx --bundle --platform=nod
 - `README.md` — 用户的安装 / 更新 / 卸载（面向用户的使用说明；不记录版本变化、迁移历史、内部校验实现与供应链细节）。
 - `docs/config-install.md` — 配置安装方式与 TUI 插件的双 Solid 陷阱（本插件不采用，供其他插件复用）。
 - `docs/token-accounting.md` — 会话 token 口径、数据来源与 DB 对账。
-- `docs/design-performance-footer.md` — 首字/速度口径、守卫与 footer 布局；改速度逻辑前必读。
+- `docs/design-performance-footer.md` — 首字/速度口径、守卫与输入框上方性能行布局；改速度逻辑前必读。
 - `docs/design-subagent-section.md` — 子代理区块取数、耗时口径与布局。
 - `docs/reference-opencode-cache-and-tps.md` — 外部同类插件的可借鉴设计。
 - `docs/reference-opencode-quota.md` — 外部同类项目 opencode-quota 的可借鉴项（行语义/配速、HTTP、凭据、刷新、server+RPC、用量与工程化取舍）。
