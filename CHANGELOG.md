@@ -3,6 +3,16 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [5.4.2](https://github.com/Just-Silver/opencode-hud/compare/v5.4.1...v5.4.2) - 2026-11-25
+
+
+### 回滚
+
+- **release** 移除 Release 说明的升级须知追加机制
+
+### 新功能
+
+- **perf** 性能行迁到输入框上方并按分隔线右对齐
 ## [5.4.1](https://github.com/Just-Silver/opencode-hud/compare/v5.4.0...v5.4.1) - 2026-11-18
 
 
