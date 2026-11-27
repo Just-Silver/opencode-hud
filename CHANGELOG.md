@@ -3,6 +3,12 @@
 本仓库所有重要变更记录于此，格式遵循 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [5.4.3](https://github.com/Just-Silver/opencode-hud/compare/v5.4.2...v5.4.3) - 2026-11-27
+
+
+### 修复
+
+- **perf** 将 TTFT 和速度左对齐
 ## [5.4.2](https://github.com/Just-Silver/opencode-hud/compare/v5.4.1...v5.4.2) - 2026-11-25
 
 
