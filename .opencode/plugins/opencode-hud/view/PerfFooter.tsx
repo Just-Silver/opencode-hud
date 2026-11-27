@@ -1,10 +1,3 @@
-// ─── UI 层：输入框上方的性能行（TTFT + 速度，纯展示） ───
-// 落点：session.composer.top 的 append（输入框正上方独占一行），见
-// docs/design-performance-footer.md。
-// 形态：`────────── TTFT 4.99s · 155 tok/s ──`——左段分隔线自动填满剩余宽度、右段固定 2 列；
-// 分隔线用底边框实现（随宽度自适应，不做宽度测量，故不会溢出或抖动）。
-// 只展示「已完成步」的精确值：生成中沿用上一步的数字，步结束（宿主写回 tokens）时替换。
-// ⚠️ 响应式约束：组件函数体只执行一次，禁止 props 快照 const。
 /** @jsxImportSource @opentui/solid */
 import { createMemo, Show, type JSX } from "solid-js"
 import { fmtSec, fmtTps } from "../shared/format.ts"
@@ -20,8 +13,7 @@ export function PerfFooter(props: { sessionID?: string; ttftMs?: number; tps?: n
     <Show when={props.sessionID && !empty()}>
       <box flexDirection="row" width="100%" flexShrink={0}>
         <box
-          flexGrow={1}
-          minWidth={0}
+          width={2}
           height={1}
           border={["bottom"]}
           borderColor={BORDER_COLOR}
@@ -52,8 +44,10 @@ export function PerfFooter(props: { sessionID?: string; ttftMs?: number; tps?: n
             {" tok/s"}
           </text>
         </Show>
+        {/* 用边框随容器伸缩，不用测量宽度或拼接字符。 */}
         <box
-          width={2}
+          flexGrow={1}
+          minWidth={0}
           height={1}
           border={["bottom"]}
           borderColor={BORDER_COLOR}

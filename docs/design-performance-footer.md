@@ -3,7 +3,7 @@
 <!-- 职责：定义 TTFT / token 速度两指标的口径、取数来源与输入框上方性能行的布局；不写：子代理区块（见 docs/design-subagent-section.md）、额度查询、安装更新 -->
 
 - 状态：**已实现**（2026-10-19，v2.4.0）；**2026-10-21 v4.0.0 移除实时链路，改为每步精确值**；**2026-11-24 落点迁到 `session.composer.top`（输入框正上方独占一行）**
-- 落点：`session.composer.top`（输入框正上方独立一行；`──── TTFT 4.99s · 155 tok/s ──` 的右对齐分隔线形态）
+- 落点：`session.composer.top`（输入框正上方独立一行；`── TTFT 4.99s · 155 tok/s ────` 的左对齐分隔线形态）
 - 前提：只支持 opencode2；不做命令、不做 `ui.panel`、**不显示延迟**
 
 ## 1. 为什么是这个落点
@@ -89,18 +89,18 @@ latestPerf(messages)                       // 从最后一条向前回溯，取�
 column（会话列，padding 2/2）
  ├ transcript.root()                      ← 消息历史
  ├ queued.root()                          ← 排队消息（约 4 行）
- ├ session.composer.top                   ← 我们：width 100%，分隔线 + 右对齐读数
+ ├ session.composer.top                   ← 我们：width 100%，左对齐读数 + 分隔线
  └ prompt.root()  [ frame / bottom / footer_row ]
                                    └ footer_row: location | file | 宿主提示
 ```
 
-- 行容器 `width="100%"` + `flexDirection="row"`：左段是一条 `flexGrow={1}` 的底边框（`border={["bottom"]}`；兼容层只透传 rounded/heavy/double，未指定时默认 Single，正好是我们要的细线）填满剩余宽度，右段固定 `width={2}` 一条同样的底边框，文字夹在中间。
+- 行容器 `width="100%"` + `flexDirection="row"`：左段固定 2 列，接 1 列空隙后显示读数，右段用 `flexGrow={1}` 填满余宽。两段线都用 `border={["bottom"]}`（兼容层只透传 rounded/heavy/double，未指定时默认 Single）。
 - 分隔线用**边框**而不是重复的 `─` 字符：宽度由布局自动分配，**不做任何宽度测量**，因此不会算错列数、不会换行、resize 时不抖。
 - 排队消息在它**上面**，出现时本行跟着输入框整体下移约 4 行，不会被隐藏或裁掉。
 
 ### 宽度预算
 
-不再分档：整行独占，文字段固定约 26 列（`TTFT ` + 时长 + ` · ` + 速度 + ` tok/s`，两侧各 1 列间距 + 右侧 2 列分隔线），其余全部交给分隔线，因此没有阈值、没有 `useTerminalDimensions()` 分支。
+不再分档：整行独占，左侧分隔线和间距固定，读数宽度随数值变化，其余空间交给右侧分隔线，因此没有阈值、没有 `useTerminalDimensions()` 分支。
 
 **标签只用英文缩写**：`TTFT`（Time To First Token）是 LLM 领域的标准叫法，比中文「首字」短且不抢视觉。配色分层：分隔线与 `TTFT`/`tok/s`/`·` 用次要色（`SECONDARY_COLOR`，线用 `BORDER_COLOR`），只有两个数值用正文色。
 
@@ -111,7 +111,7 @@ column（会话列，padding 2/2）
 
 | 场景 | 显示 |
 | --- | --- |
-| 有有效步样本 | `──── TTFT 0.42s · 48.2 tok/s ──`（右对齐） |
+| 有有效步样本 | `── TTFT 0.42s · 48.2 tok/s ────`（左对齐） |
 | 当前步生成中（无新样本） | 与上一态完全相同——沿用最近一条已完成步的值 |
 | 首页 / 无 `sessionID` / 无任何有效样本 | 不渲染，不显示 `--` |
 
